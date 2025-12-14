@@ -31,7 +31,7 @@ CREATE TABLE clients (
     phone TEXT,
     address TEXT,
     total_projects INTEGER DEFAULT 0,
-    total_revenue DECIMAL(10, 2) DEFAULT 0,
+    total_revenue DECIMAL(15, 2) DEFAULT 0,
     status client_status DEFAULT 'active',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -43,7 +43,7 @@ CREATE TABLE projects (
     name TEXT NOT NULL,
     description TEXT,
     status project_status DEFAULT 'planning',
-    budget DECIMAL(10, 2),
+    budget DECIMAL(15, 2),
     start_date DATE,
     deadline DATE,
     progress_percentage INTEGER DEFAULT 0 CHECK (progress_percentage >= 0 AND progress_percentage <= 100),
@@ -86,9 +86,9 @@ CREATE TABLE invoices (
     client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
     issue_date DATE NOT NULL,
     due_date DATE NOT NULL,
-    subtotal DECIMAL(10, 2) NOT NULL,
-    tax DECIMAL(10, 2) DEFAULT 0,
-    total DECIMAL(10, 2) NOT NULL,
+    subtotal DECIMAL(15, 2) NOT NULL,
+    tax DECIMAL(15, 2) DEFAULT 0,
+    total DECIMAL(15, 2) NOT NULL,
     status invoice_status DEFAULT 'draft',
     paid_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -100,8 +100,8 @@ CREATE TABLE invoice_items (
     invoice_id UUID REFERENCES invoices(id) ON DELETE CASCADE,
     description TEXT NOT NULL,
     quantity INTEGER NOT NULL,
-    unit_price DECIMAL(10, 2) NOT NULL,
-    total DECIMAL(10, 2) NOT NULL
+    unit_price DECIMAL(15, 2) NOT NULL,
+    total DECIMAL(15, 2) NOT NULL
 );
 
 -- Milestones table
