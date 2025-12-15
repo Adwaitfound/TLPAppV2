@@ -30,6 +30,9 @@ export default function LoginPage() {
         }, 10000) // 10 second timeout
 
         try {
+            // Always clear any existing session to avoid cross-account bleed
+            await supabase.auth.signOut()
+
             console.log('Step 1: Attempting login with:', email)
             const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
                 email,
