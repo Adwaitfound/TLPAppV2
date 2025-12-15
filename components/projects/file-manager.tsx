@@ -201,21 +201,20 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
             }
 
             debug.log('FILE_MANAGER', 'Add link inserting...')
-            const { error } = await insertWithTimeout(
-                supabase
-                    .from('project_files')
-                    .insert({
-                        project_id: projectId,
-                        file_name: linkName,
-                        file_type: getFileType(linkName),
-                        file_category: linkCategory,
-                        storage_type: 'google_drive',
-                        file_url: linkUrl,
-                        description: linkDescription,
-                        uploaded_by: user?.id,
-                    }),
-                12000
-            ) as any
+            const insertPromise = supabase
+                .from('project_files')
+                .insert({
+                    project_id: projectId,
+                    file_name: linkName,
+                    file_type: getFileType(linkName),
+                    file_category: linkCategory,
+                    storage_type: 'google_drive',
+                    file_url: linkUrl,
+                    description: linkDescription,
+                    uploaded_by: user?.id,
+                })
+            
+            const { error } = await insertWithTimeout(insertPromise, 12000) as any
 
             if (error) throw error
 
