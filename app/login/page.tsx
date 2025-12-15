@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,19 @@ export default function LoginPage() {
     const [error, setError] = useState<string | null>(null)
     const router = useRouter()
     const supabase = createClient()
+
+    // Hard reset any existing session when landing on login to avoid cross-account reuse
+    useEffect(() => {
+        const resetSession = async () => {
+            try {
+                await supabase.auth.signOut()
+            } catch (err) {
+                console.error('Initial signOut on login mount failed:', err)
+            }
+        }
+        resetSession()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault()
