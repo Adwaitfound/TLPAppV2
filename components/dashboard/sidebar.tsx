@@ -3,16 +3,17 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { 
-  LayoutDashboard, 
-  FolderKanban, 
-  Users, 
-  FileText, 
-  BarChart3, 
-  Settings 
+import {
+  LayoutDashboard,
+  FolderKanban,
+  Users,
+  FileText,
+  BarChart3,
+  Settings
 } from "lucide-react"
+import { useAuth } from "@/contexts/auth-context"
 
-const routes = [
+const adminRoutes = [
   {
     label: "Dashboard",
     icon: LayoutDashboard,
@@ -22,11 +23,6 @@ const routes = [
     label: "Projects",
     icon: FolderKanban,
     href: "/dashboard/projects",
-  },
-  {
-    label: "Clients",
-    icon: Users,
-    href: "/dashboard/clients",
   },
   {
     label: "Invoices",
@@ -45,8 +41,58 @@ const routes = [
   },
 ]
 
+const employeeRoutes = [
+  {
+    label: "Dashboard",
+    icon: LayoutDashboard,
+    href: "/dashboard/employee",
+  },
+  {
+    label: "My Projects",
+    icon: FolderKanban,
+    href: "/dashboard/projects",
+  },
+  {
+    label: "Settings",
+    icon: Settings,
+    href: "/dashboard/settings",
+  },
+]
+
+const clientRoutes = [
+  {
+    label: "Dashboard",
+    icon: LayoutDashboard,
+    href: "/dashboard/client",
+  },
+  {
+    label: "My Projects",
+    icon: FolderKanban,
+    href: "/dashboard/client/projects",
+  },
+  {
+    label: "Invoices",
+    icon: FileText,
+    href: "/dashboard/client/invoices",
+  },
+  {
+    label: "Settings",
+    icon: Settings,
+    href: "/dashboard/settings",
+  },
+]
+
 export function Sidebar() {
   const pathname = usePathname()
+  const { user } = useAuth()
+
+  // Determine routes based on user role
+  let routes = adminRoutes
+  if (user?.role === 'client') {
+    routes = clientRoutes
+  } else if (user?.role === 'project_manager') {
+    routes = employeeRoutes
+  }
 
   return (
     <div className="flex h-full flex-col gap-2">

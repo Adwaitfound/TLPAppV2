@@ -1,5 +1,23 @@
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- Drop existing tables if they exist (in reverse order of dependencies)
+DROP TABLE IF EXISTS invoice_items CASCADE;
+DROP TABLE IF EXISTS invoices CASCADE;
+DROP TABLE IF EXISTS project_comments CASCADE;
+DROP TABLE IF EXISTS project_files CASCADE;
+DROP TABLE IF EXISTS milestones CASCADE;
+DROP TABLE IF EXISTS projects CASCADE;
+DROP TABLE IF EXISTS clients CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+
+-- Drop existing types if they exist
+DROP TYPE IF EXISTS milestone_status CASCADE;
+DROP TYPE IF EXISTS comment_status CASCADE;
+DROP TYPE IF EXISTS client_status CASCADE;
+DROP TYPE IF EXISTS invoice_status CASCADE;
+DROP TYPE IF EXISTS project_status CASCADE;
+DROP TYPE IF EXISTS user_role CASCADE;
+
+-- Enable pgcrypto extension for gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- Create custom types
 CREATE TYPE user_role AS ENUM ('admin', 'project_manager', 'client');
@@ -11,7 +29,7 @@ CREATE TYPE milestone_status AS ENUM ('pending', 'in_progress', 'completed');
 
 -- Users table
 CREATE TABLE users (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     email TEXT UNIQUE NOT NULL,
     full_name TEXT NOT NULL,
     avatar_url TEXT,
@@ -23,7 +41,7 @@ CREATE TABLE users (
 
 -- Clients table
 CREATE TABLE clients (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     company_name TEXT NOT NULL,
     contact_person TEXT NOT NULL,
@@ -38,7 +56,7 @@ CREATE TABLE clients (
 
 -- Projects table
 CREATE TABLE projects (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     description TEXT,
@@ -55,7 +73,7 @@ CREATE TABLE projects (
 
 -- Project files table
 CREATE TABLE project_files (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
     file_name TEXT NOT NULL,
     file_url TEXT NOT NULL,
@@ -68,7 +86,7 @@ CREATE TABLE project_files (
 
 -- Project comments table
 CREATE TABLE project_comments (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
     file_id UUID REFERENCES project_files(id) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -80,7 +98,7 @@ CREATE TABLE project_comments (
 
 -- Invoices table
 CREATE TABLE invoices (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     invoice_number TEXT UNIQUE NOT NULL,
     project_id UUID REFERENCES projects(id),
     client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
@@ -96,7 +114,7 @@ CREATE TABLE invoices (
 
 -- Invoice items table
 CREATE TABLE invoice_items (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     invoice_id UUID REFERENCES invoices(id) ON DELETE CASCADE,
     description TEXT NOT NULL,
     quantity INTEGER NOT NULL,
@@ -106,7 +124,7 @@ CREATE TABLE invoice_items (
 
 -- Milestones table
 CREATE TABLE milestones (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     description TEXT,

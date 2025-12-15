@@ -2,7 +2,7 @@ export type UserRole = 'admin' | 'project_manager' | 'client'
 
 export type ProjectStatus = 'planning' | 'in_progress' | 'in_review' | 'completed' | 'cancelled'
 
-export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled'
+export type InvoiceStatus = 'draft' | 'pending' | 'sent' | 'paid' | 'overdue' | 'cancelled'
 
 export type ClientStatus = 'active' | 'inactive'
 
@@ -49,6 +49,12 @@ export interface Project {
   created_by: string
   created_at: string
   updated_at: string
+  // Joined data
+  clients?: {
+    company_name: string
+    contact_person: string
+    email: string
+  }
 }
 
 export interface ProjectFile {
@@ -87,6 +93,13 @@ export interface Invoice {
   status: InvoiceStatus
   paid_at?: string
   created_at: string
+  // Joined data
+  clients?: {
+    company_name: string
+  }
+  projects?: {
+    name: string
+  }
 }
 
 export interface InvoiceItem {
@@ -107,4 +120,11 @@ export interface Milestone {
   status: MilestoneStatus
   completed_at?: string
   created_at: string
+  // Joined data
+  projects?: {
+    name: string
+    clients?: {
+      company_name: string
+    }
+  }
 }
