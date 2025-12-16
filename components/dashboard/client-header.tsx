@@ -1,6 +1,5 @@
 "use client"
 
-import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Bell, Search, Moon, Sun, User, LogOut, Video } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -19,7 +18,6 @@ import { useAuth } from "@/contexts/auth-context"
 
 export function ClientHeader() {
     const { setTheme, theme } = useTheme()
-    const router = useRouter()
     const { user, logout } = useAuth()
 
     const handleLogout = () => {

@@ -1,17 +1,9 @@
--- Sample Data for Video Production App Dashboard
--- This script adds realistic sample data to populate the admin dashboard
+DO $$ BEGIN RAISE EXCEPTION 'Sample data script disabled: use your live database.'; END $$;
 
--- First, let's add some sample clients (make sure to replace user_id with actual auth.users IDs if needed)
-INSERT INTO clients (id, company_name, contact_person, email, phone, address, total_projects, total_revenue, status, created_at)
-VALUES 
-    ('11111111-1111-1111-1111-111111111111', 'Tech Innovations Inc', 'Sarah Johnson', 'sarah@techinnovations.com', '+1 (555) 123-4567', '123 Tech Street, San Francisco, CA 94102', 3, 125000, 'active', NOW() - INTERVAL '6 months'),
-    ('22222222-2222-2222-2222-222222222222', 'Creative Studios LLC', 'Michael Chen', 'michael@creativestudios.com', '+1 (555) 234-5678', '456 Creative Ave, Los Angeles, CA 90001', 5, 287500, 'active', NOW() - INTERVAL '8 months'),
-    ('33333333-3333-3333-3333-333333333333', 'Global Marketing Group', 'Emma Wilson', 'emma@globalmarketing.com', '+1 (555) 345-6789', '789 Marketing Blvd, New York, NY 10001', 2, 95000, 'active', NOW() - INTERVAL '4 months'),
-    ('44444444-4444-4444-4444-444444444444', 'StartUp Ventures', 'David Brown', 'david@startupventures.com', '+1 (555) 456-7890', '321 Startup Lane, Austin, TX 78701', 4, 156000, 'active', NOW() - INTERVAL '10 months'),
-    ('55555555-5555-5555-5555-555555555555', 'Enterprise Solutions', 'Lisa Anderson', 'lisa@enterprisesolutions.com', '+1 (555) 567-8901', '654 Enterprise Dr, Seattle, WA 98101', 1, 42000, 'active', NOW() - INTERVAL '2 months'),
-    ('66666666-6666-6666-6666-666666666666', 'Digital Media Co', 'James Taylor', 'james@digitalmedia.com', '+1 (555) 678-9012', '987 Digital St, Chicago, IL 60601', 3, 189000, 'active', NOW() - INTERVAL '12 months')
-ON CONFLICT (id) DO NOTHING;
 
+
+-- DO NOT USE: Sample data script disabled. Use real Supabase data.
+DO $$ BEGIN RAISE EXCEPTION 'Disabled: sample data script removed. Use live database only.'; END $$;
 -- Add sample projects
 INSERT INTO projects (id, client_id, name, description, status, budget, start_date, deadline, progress_percentage, created_at, updated_at)
 VALUES 

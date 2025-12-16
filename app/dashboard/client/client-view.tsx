@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { StatCard } from "@/components/shared/stat-card"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { FolderKanban, Download, FileText, MessageSquare, Plus, Eye } from "lucide-react"
+import { FolderKanban, Download, FileText, Plus, Eye } from "lucide-react"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { createClient } from "@/lib/supabase/client"
 import { useAuth } from "@/contexts/auth-context"
@@ -95,7 +95,7 @@ export default function ClientDashboard() {
         }
 
         fetchClientData()
-    }, [user, authLoading])
+    }, [user?.id, authLoading])
 
     if (authLoading || loading) {
         return (

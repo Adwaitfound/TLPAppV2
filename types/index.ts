@@ -46,7 +46,7 @@ export type ClientStatus = 'active' | 'inactive'
 
 export type CommentStatus = 'pending' | 'resolved'
 
-export type MilestoneStatus = 'pending' | 'in_progress' | 'completed'
+export type MilestoneStatus = 'pending' | 'in_progress' | 'completed' | 'blocked'
 
 export interface User {
   id: string
@@ -137,16 +137,22 @@ export interface ProjectComment {
 export interface Invoice {
   id: string
   invoice_number: string
-  project_id: string
+  project_id?: string
   client_id: string
   issue_date: string
-  due_date: string
-  subtotal: number
-  tax: number
+  due_date?: string
+  subtotal?: number
+  tax?: number
   total: number
   status: InvoiceStatus
   paid_at?: string
   created_at: string
+  // New fields for invoice upload
+  advance_amount?: number
+  advance_date?: string
+  tax_type?: 'gst' | 'non_gst' | 'both'
+  invoice_file_url?: string
+  notes?: string
   // Joined data
   clients?: {
     company_name: string
@@ -173,7 +179,10 @@ export interface Milestone {
   due_date?: string
   status: MilestoneStatus
   completed_at?: string
+  position: number
+  created_by_email?: string
   created_at: string
+  updated_at?: string
   // Joined data
   projects?: {
     name: string

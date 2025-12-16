@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Video } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
+import { debug } from "@/lib/debug"
 
 export default function LoginPage() {
     const [email, setEmail] = useState("")
@@ -17,17 +18,25 @@ export default function LoginPage() {
     const router = useRouter()
     const supabase = createClient()
 
+    const describeError = (err: any) => {
+        const code = err?.code || err?.status
+        if (code === 'invalid_grant' || err?.message?.toLowerCase().includes('invalid login')) return 'Invalid email or password'
+        if (code === 'email_not_confirmed') return 'Please verify your email before logging in'
+        if (code === 'rate_limit_exceeded') return 'Too many attempts. Please wait and try again.'
+        return err?.message || 'Failed to log in'
+    }
+
     // Hard reset any existing session when landing on login to avoid cross-account reuse
     useEffect(() => {
         const resetSession = async () => {
             try {
                 await supabase.auth.signOut()
             } catch (err) {
-                console.error('Initial signOut on login mount failed:', err)
+                debug.warn('LOGIN', 'Initial signOut on login mount failed', { message: (err as any)?.message })
             }
         }
         resetSession()
-        
+
         // Aggressively clear form fields to prevent browser autofill
         setTimeout(() => {
             setEmail("")
@@ -38,7 +47,7 @@ export default function LoginPage() {
             if (emailInput) emailInput.value = ""
             if (passwordInput) passwordInput.value = ""
         }, 100)
-        
+
         // Cleanup on unmount
         return () => {
             setEmail("")
@@ -64,6 +73,7 @@ export default function LoginPage() {
             await supabase.auth.signOut()
 
             console.log('Step 1: Attempting login with:', email)
+            debug.log('LOGIN', 'Attempting login', { email })
             const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
                 email,
                 password,
@@ -84,6 +94,7 @@ export default function LoginPage() {
             }
 
             console.log('Step 3: User authenticated:', authData.user.id)
+            debug.success('LOGIN', 'User authenticated', { userId: authData.user.id })
 
             // Fetch user data from users table
             console.log('Step 4: Fetching user profile...')
@@ -134,6 +145,7 @@ export default function LoginPage() {
 
             const userData = usersData[0]
             console.log('Step 6: User data fetched, redirecting based on role:', userData.role)
+            debug.success('LOGIN', 'Profile fetched', { role: userData.role, email: userData.email })
 
             // Small delay to ensure session is properly set before redirect
             await new Promise(resolve => setTimeout(resolve, 500))
@@ -153,9 +165,12 @@ export default function LoginPage() {
             clearTimeout(timeout)
         } catch (err: any) {
             console.error('Login error:', err)
-            setError(err.message || 'Failed to log in')
-            setLoading(false)
+            const message = describeError(err)
+            debug.error('LOGIN', 'Login failed', { message, code: err?.code })
+            setError(message)
+        } finally {
             clearTimeout(timeout)
+            setLoading(false)
         }
     }
 
@@ -176,7 +191,7 @@ export default function LoginPage() {
                         {/* Hidden dummy fields to prevent autofill */}
                         <input type="text" style={{ display: 'none' }} tabIndex={-1} autoComplete="off" />
                         <input type="password" style={{ display: 'none' }} tabIndex={-1} autoComplete="off" />
-                        
+
                         {error && (
                             <div className="p-3 text-sm text-red-500 bg-red-50 dark:bg-red-900/20 rounded-md">
                                 {error}
@@ -221,7 +236,7 @@ export default function LoginPage() {
 
                         <div className="text-center text-sm text-muted-foreground space-y-2">
                             <div>
-                                Don't have an account?{' '}
+                                Don&apos;t have an account?{' '}
                                 <Button
                                     type="button"
                                     variant="link"

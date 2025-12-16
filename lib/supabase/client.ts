@@ -6,7 +6,6 @@ export function createClient() {
         const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
         // Safe debug: log only first 8 chars of key to verify correct key is loaded
         // This helps diagnose Invalid API key issues without exposing secrets.
-        // eslint-disable-next-line no-console
         console.log('[Supabase] URL:', url, 'ANON key:', anon ? anon.slice(0, 8) + '…' : 'missing')
     }
     return createBrowserClient(

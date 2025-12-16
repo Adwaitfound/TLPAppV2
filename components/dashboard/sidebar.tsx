@@ -82,11 +82,6 @@ const clientRoutes = [
     href: "/dashboard/client/projects",
   },
   {
-    label: "Invoices",
-    icon: FileText,
-    href: "/dashboard/client/invoices",
-  },
-  {
     label: "Settings",
     icon: Settings,
     href: "/dashboard/settings",

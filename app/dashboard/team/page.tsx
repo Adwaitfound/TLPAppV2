@@ -20,9 +20,8 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
-    DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Search, Loader2, Users, Mail, UserCheck, Shield, Briefcase, Trash2, Edit } from "lucide-react"
+import { Plus, Search, Loader2, Users, Mail, UserCheck, Shield, Briefcase, Trash2 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import type { User, Project } from "@/types"
 import { useAuth } from "@/contexts/auth-context"
@@ -203,7 +202,7 @@ export default function TeamPage() {
     async function handleAddMember(e: React.FormEvent) {
         e.preventDefault()
         if (submitting) return
-        
+
         setSubmitting(true)
 
         try {

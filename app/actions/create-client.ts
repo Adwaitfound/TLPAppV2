@@ -22,7 +22,7 @@ type ClientResult = {
 export async function createClientAccount(formData: ClientFormData): Promise<ClientResult> {
     try {
         console.log('[SERVER] createClientAccount called with:', { company_name: formData.company_name, email: formData.email })
-        
+
         // Validate environment variables
         const url = process.env.NEXT_PUBLIC_SUPABASE_URL
         const key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -48,52 +48,83 @@ export async function createClientAccount(formData: ClientFormData): Promise<Cli
         // Generate a random password
         const generatedPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-10).toUpperCase()
 
-        console.log('[SERVER] Creating auth user...')
-        const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-            email: formData.email,
-            password: generatedPassword,
-            email_confirm: true,
-            user_metadata: {
-                full_name: formData.contact_person,
-                role: 'client',
+        console.log('[SERVER] Checking if auth user already exists...')
+        // Check if user already exists
+        const { data: existingUser } = await supabaseAdmin.auth.admin.listUsers()
+        const userExists = existingUser?.users?.some(u => u.email === formData.email)
+
+        let userId: string
+
+        if (userExists) {
+            console.log('[SERVER] Auth user already exists, finding existing user ID...')
+            const { data: { users }, error: listError } = await supabaseAdmin.auth.admin.listUsers()
+            const existingAuthUser = users?.find(u => u.email === formData.email)
+
+            if (!existingAuthUser?.id) {
+                return { success: false, error: 'User exists but could not retrieve ID' }
             }
-        })
-
-        if (authError) {
-            console.error('[SERVER] Auth error:', authError)
-            return { success: false, error: `Auth error: ${authError.message}` }
-        }
-
-        if (!authData.user?.id) {
-            console.error('[SERVER] No user ID returned from auth')
-            return { success: false, error: 'Failed to create auth user' }
-        }
-
-        console.log('[SERVER] Auth user created:', authData.user.id)
-
-        console.log('[SERVER] Inserting user record...')
-        const { error: userError } = await supabaseAdmin
-            .from('users')
-            .insert({
-                id: authData.user.id,
+            userId = existingAuthUser.id
+            console.log('[SERVER] Using existing auth user:', userId)
+        } else {
+            console.log('[SERVER] Creating new auth user...')
+            const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
                 email: formData.email,
-                full_name: formData.contact_person,
-                role: 'client',
-                company_name: formData.company_name,
+                password: generatedPassword,
+                email_confirm: true,
+                user_metadata: {
+                    full_name: formData.contact_person,
+                    role: 'client',
+                }
             })
 
-        if (userError) {
-            console.error('[SERVER] User insert error:', userError)
-            return { success: false, error: `User insert error: ${userError.message}` }
+            if (authError) {
+                console.error('[SERVER] Auth error:', authError)
+                return { success: false, error: `Auth error: ${authError.message}` }
+            }
+
+            if (!authData.user?.id) {
+                console.error('[SERVER] No user ID returned from auth')
+                return { success: false, error: 'Failed to create auth user' }
+            }
+
+            userId = authData.user.id
+            console.log('[SERVER] Auth user created:', userId)
         }
 
-        console.log('[SERVER] User record created')
+        console.log('[SERVER] Checking if user record exists...')
+        const { data: existingUserRecord } = await supabaseAdmin
+            .from('users')
+            .select('id')
+            .eq('id', userId)
+            .single()
+
+        if (!existingUserRecord) {
+            console.log('[SERVER] Inserting user record...')
+            const { error: userError } = await supabaseAdmin
+                .from('users')
+                .insert({
+                    id: userId,
+                    email: formData.email,
+                    full_name: formData.contact_person,
+                    role: 'client',
+                    company_name: formData.company_name,
+                })
+
+            if (userError) {
+                console.error('[SERVER] User insert error:', userError)
+                return { success: false, error: `User insert error: ${userError.message}` }
+            }
+
+            console.log('[SERVER] User record created')
+        } else {
+            console.log('[SERVER] User record already exists')
+        }
 
         console.log('[SERVER] Inserting client record...')
         const { error: clientError } = await supabaseAdmin
             .from('clients')
             .insert([{
-                user_id: authData.user.id,
+                user_id: userId,
                 company_name: formData.company_name,
                 contact_person: formData.contact_person,
                 email: formData.email,

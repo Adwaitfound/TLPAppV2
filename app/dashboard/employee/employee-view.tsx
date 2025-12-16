@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { StatCard } from "@/components/shared/stat-card"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { FolderKanban, Upload, MessageSquare, Clock, CheckCircle2, AlertCircle } from "lucide-react"
+import { FolderKanban, Upload, MessageSquare, Clock, CheckCircle2 } from "lucide-react"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { createClient } from "@/lib/supabase/client"
 import { useAuth } from "@/contexts/auth-context"
@@ -53,7 +53,7 @@ export default function EmployeeDashboard() {
                 // Combine and deduplicate projects
                 const allProjects = [...(projectsData || [])]
                 const teamProjectsData = (teamProjects || []).map((tp: any) => tp.projects).filter(Boolean)
-                
+
                 teamProjectsData.forEach((tp: any) => {
                     if (!allProjects.find(p => p.id === tp.id)) {
                         allProjects.push(tp)
@@ -104,7 +104,7 @@ export default function EmployeeDashboard() {
         }
 
         fetchEmployeeData()
-    }, [user, authLoading])
+    }, [user?.id, authLoading])
 
     if (authLoading || loading) {
         return (
@@ -175,7 +175,7 @@ export default function EmployeeDashboard() {
                     <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                         <div>
                             <CardTitle className="text-lg md:text-xl">Active Projects</CardTitle>
-                            <CardDescription className="text-xs md:text-sm">Projects you're currently working on</CardDescription>
+                            <CardDescription className="text-xs md:text-sm">Projects you&apos;re currently working on</CardDescription>
                         </div>
                     </CardHeader>
                     <CardContent>

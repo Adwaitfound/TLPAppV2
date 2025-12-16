@@ -2,12 +2,26 @@
 
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { BarChart3, TrendingUp, DollarSign, FolderKanban, Users, Loader2 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { SERVICE_TYPES, type ServiceType, type Project, type Invoice, type Client } from "@/types"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import {
+    BarChart,
+    Bar,
+    PieChart,
+    Pie,
+    Cell,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
+    Legend,
+    ResponsiveContainer,
+    LineChart,
+    Line,
+} from "recharts"
 
 interface ServiceStats {
     service_type: ServiceType
@@ -145,11 +159,115 @@ export default function AnalyticsPage() {
                 </Card>
             </div>
 
-            {/* Service Breakdown */}
+            {/* Charts Section */}
+            <div className="grid gap-4 md:grid-cols-2">
+                {/* Revenue by Service - Bar Chart */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Revenue by Service</CardTitle>
+                        <CardDescription>Revenue distribution across services</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        {serviceStats.some(s => s.total_revenue > 0) ? (
+                            <ResponsiveContainer width="100%" height={300}>
+                                <BarChart
+                                    data={serviceStats.map(s => ({
+                                        name: SERVICE_TYPES[s.service_type].label,
+                                        revenue: s.total_revenue,
+                                    }))}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} />
+                                    <YAxis />
+                                    <Tooltip formatter={(value) => `₹${value.toLocaleString()}`} />
+                                    <Bar dataKey="revenue" fill="#3b82f6" radius={[8, 8, 0, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="h-80 flex items-center justify-center text-muted-foreground">
+                                No revenue data yet
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+
+                {/* Projects by Service - Pie Chart */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Projects by Service</CardTitle>
+                        <CardDescription>Project count distribution</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        {serviceStats.some(s => s.project_count > 0) ? (
+                            <ResponsiveContainer width="100%" height={300}>
+                                <PieChart>
+                                    <Pie
+                                        data={serviceStats.map(s => ({
+                                            name: SERVICE_TYPES[s.service_type].label,
+                                            value: s.project_count,
+                                        }))}
+                                        cx="50%"
+                                        cy="50%"
+                                        labelLine={false}
+                                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                        outerRadius={80}
+                                        fill="#8884d8"
+                                        dataKey="value"
+                                    >
+                                        <Cell fill="#3b82f6" />
+                                        <Cell fill="#10b981" />
+                                        <Cell fill="#f59e0b" />
+                                    </Pie>
+                                    <Tooltip />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="h-80 flex items-center justify-center text-muted-foreground">
+                                No project data yet
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Active Projects vs Completed - Bar Chart */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Project Status Distribution</CardTitle>
+                    <CardDescription>Active vs completed projects by service</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {serviceStats.some(s => s.active_projects > 0 || s.project_count > 0) ? (
+                        <ResponsiveContainer width="100%" height={300}>
+                            <BarChart
+                                data={serviceStats.map(s => ({
+                                    name: SERVICE_TYPES[s.service_type].label,
+                                    active: s.active_projects,
+                                    completed: s.project_count - s.active_projects,
+                                }))}
+                            >
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis dataKey="name" />
+                                <YAxis />
+                                <Tooltip />
+                                <Legend />
+                                <Bar dataKey="active" fill="#3b82f6" name="Active Projects" radius={[8, 8, 0, 0]} />
+                                <Bar dataKey="completed" fill="#10b981" name="Completed Projects" radius={[8, 8, 0, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    ) : (
+                        <div className="h-80 flex items-center justify-center text-muted-foreground">
+                            No project data yet
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
+            {/* Service Breakdown Details */}
             <Card>
                 <CardHeader>
                     <CardTitle>Service Breakdown</CardTitle>
-                    <CardDescription>Performance metrics by service vertical</CardDescription>
+                    <CardDescription>Detailed performance metrics by service vertical</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <div className="space-y-6">
@@ -158,7 +276,7 @@ export default function AnalyticsPage() {
                             const revenuePercent = totalRevenue > 0 ? (stat.total_revenue / totalRevenue) * 100 : 0
 
                             return (
-                                <div key={stat.service_type} className="space-y-3">
+                                <div key={stat.service_type} className="space-y-3 border-b last:border-b-0 pb-6 last:pb-0">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-3">
                                             <div className="text-2xl">{serviceConfig.icon}</div>

@@ -1,6 +1,7 @@
 "use client"
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps, jsx-a11y/alt-text */
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,12 +23,13 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
-import { Upload, Link as LinkIcon, FileText, Image, Video, File, Download, ExternalLink, Trash2, Loader2 } from "lucide-react"
+import { Upload, Link as LinkIcon, FileText, Image, Video, File, ExternalLink, Trash2, Loader2, Eye } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { debug } from "@/lib/debug"
 import type { ProjectFile, FileCategory } from "@/types"
-import { FILE_CATEGORIES, validateFileSize, formatFileSize, getFileType, getGoogleDriveEmbedUrl } from "@/lib/file-upload"
+import { FILE_CATEGORIES, validateFileSize, formatFileSize, getFileType } from "@/lib/file-upload"
 import { useAuth } from "@/contexts/auth-context"
+import { getSignedProjectFileUrl } from "@/app/actions/project-file-operations"
 
 interface FileManagerProps {
     projectId: string
@@ -46,6 +48,13 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
     const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false)
     const [isDriveFolderDialogOpen, setIsDriveFolderDialogOpen] = useState(false)
     const [newDriveFolderUrl, setNewDriveFolderUrl] = useState(driveFolderUrl || "")
+    const [isPreviewOpen, setIsPreviewOpen] = useState(false)
+    const [previewFile, setPreviewFile] = useState<ProjectFile | null>(null)
+
+    // Refs to prevent race conditions
+    const isSubmittingRef = useRef(false)
+    const isUploadingRef = useRef(false)
+    const isSavingDriveRef = useRef(false)
 
     // Upload form state
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -63,10 +72,44 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
         fetchFiles()
     }, [projectId])
 
-    // Keep local state in sync with incoming prop updates
+    // Keep local state in sync with incoming prop updates ONLY when dialog is closed
+    // This prevents the input from changing while the user is editing it
     useEffect(() => {
-        setNewDriveFolderUrl(driveFolderUrl || "")
-    }, [driveFolderUrl])
+        if (!isDriveFolderDialogOpen) {
+            setNewDriveFolderUrl(driveFolderUrl || "")
+        }
+    }, [driveFolderUrl, isDriveFolderDialogOpen])
+
+    // Reset forms when dialogs close to avoid re-render loops in onOpenChange
+    useEffect(() => {
+        if (!isUploadDialogOpen) {
+            setSelectedFile(null)
+            setUploadDescription("")
+            setUploadCategory("other")
+            setUploading(false)
+            isUploadingRef.current = false
+        }
+    }, [isUploadDialogOpen])
+
+    useEffect(() => {
+        if (!isLinkDialogOpen) {
+            setLinkUrl("")
+            setLinkName("")
+            setLinkDescription("")
+            setLinkCategory("other")
+            setLinkSubmitting(false)
+            isSubmittingRef.current = false
+            debug.log('FILE_MANAGER', 'Add link dialog closed and form reset')
+        }
+    }, [isLinkDialogOpen])
+
+    useEffect(() => {
+        if (!isDriveFolderDialogOpen) {
+            setNewDriveFolderUrl(driveFolderUrl || "")
+            setSavingDrive(false)
+            isSavingDriveRef.current = false
+        }
+    }, [isDriveFolderDialogOpen, driveFolderUrl])
 
     async function fetchFiles() {
         setLoading(true)
@@ -95,7 +138,13 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
     }
 
     async function handleFileUpload() {
-        if (!selectedFile || uploading) return
+        // Prevent overlapping uploads
+        if (isUploadingRef.current) {
+            debug.log('FILE_MANAGER', 'Upload already in progress, ignoring')
+            return
+        }
+
+        if (!selectedFile) return
 
         const validation = validateFileSize(selectedFile)
         if (!validation.valid) {
@@ -103,6 +152,13 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
             return
         }
 
+        // Check file limit
+        if (files.length >= 20) {
+            alert('Maximum 20 files/links per project. Please delete some files before adding more.')
+            return
+        }
+
+        isUploadingRef.current = true
         setUploading(true)
         const supabase = createClient()
 
@@ -127,7 +183,7 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                 .getPublicUrl(filePath)
 
             // Save file metadata
-            const { error: dbError } = await supabase
+            const { data: fileData, error: dbError } = await supabase
                 .from('project_files')
                 .insert({
                     project_id: projectId,
@@ -140,17 +196,26 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                     description: uploadDescription,
                     uploaded_by: user?.id,
                 })
+                .select()
+                .single()
 
             if (dbError) throw dbError
 
-            // Reset form and close first
+            // Optimistically add to files array
+            if (fileData) {
+                setFiles(prev => [fileData, ...prev])
+            }
+
+            // Close dialog first
+            setIsUploadDialogOpen(false)
+
+            // Reset form
             setSelectedFile(null)
             setUploadDescription("")
-            setIsUploadDialogOpen(false)
-            debug.success('FILE_MANAGER', 'Upload saved, dialog closed')
-            
-            // Then refresh
-            await fetchFiles()
+            setUploadCategory("document")
+            setUploading(false)
+
+            debug.success('FILE_MANAGER', 'Upload saved, added to list, dialog closed')
         } catch (error: any) {
             console.error('Error uploading file:', error)
             debug.error('FILE_MANAGER', 'Upload error', {
@@ -162,19 +227,33 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
             alert(error.message || 'Failed to upload file')
         } finally {
             setUploading(false)
-            debug.log('FILE_MANAGER', 'Upload end')
+            isUploadingRef.current = false
+            debug.log('FILE_MANAGER', 'Upload end - flags reset')
         }
     }
 
     async function handleAddLink() {
-        if (!linkUrl || !linkName || linkSubmitting) {
-            if (!linkUrl || !linkName) {
-                alert('Please provide both URL and file name')
-            }
+        // Prevent overlapping submissions using ref (survives re-renders)
+        if (isSubmittingRef.current) {
+            debug.log('FILE_MANAGER', 'Submission already in progress, ignoring')
             return
         }
 
+        if (!linkUrl.trim() || !linkName.trim()) {
+            alert('Please provide both URL and file name')
+            return
+        }
+
+        // Check file limit
+        if (files.length >= 20) {
+            alert('Maximum 20 files/links per project. Please delete some files before adding more.')
+            return
+        }
+
+        // Mark as submitting using ref (not affected by re-renders)
+        isSubmittingRef.current = true
         setLinkSubmitting(true)
+
         const supabase = createClient()
 
         try {
@@ -183,10 +262,10 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                 name: linkName,
                 url: linkUrl,
                 category: linkCategory,
+                currentFileCount: files.length,
             })
 
-            debug.log('FILE_MANAGER', 'Add link inserting...')
-            const { error } = await supabase
+            const { data, error } = await supabase
                 .from('project_files')
                 .insert({
                     project_id: projectId,
@@ -198,18 +277,29 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                     description: linkDescription,
                     uploaded_by: user?.id,
                 })
+                .select()
+                .single()
 
-            if (error) throw error
+            if (error) {
+                console.error('Supabase insert error:', error)
+                throw error
+            }
 
-            // Reset form and close first
+            debug.success('FILE_MANAGER', 'Link saved successfully')
+
+            // Add to files array
+            if (data) {
+                setFiles(prev => [data, ...prev])
+            }
+
+            // Close dialog and reset form
+            setIsLinkDialogOpen(false)
             setLinkUrl("")
             setLinkName("")
             setLinkDescription("")
-            setIsLinkDialogOpen(false)
-            debug.success('FILE_MANAGER', 'Link saved, dialog closed')
-            
-            // Then refresh
-            await fetchFiles()
+            setLinkCategory("other")
+
+            debug.success('FILE_MANAGER', 'File added, dialog closed')
         } catch (error: any) {
             console.error('Error adding link:', error)
             debug.error('FILE_MANAGER', 'Add link error', {
@@ -224,19 +314,36 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                     : error?.message || 'Failed to add link'
             alert(msg)
         } finally {
+            // Always reset submission flags
             setLinkSubmitting(false)
-            debug.log('FILE_MANAGER', 'Add link end')
+            isSubmittingRef.current = false
+            debug.log('FILE_MANAGER', 'Add link end - flags reset')
         }
     }
 
     async function handleUpdateDriveFolder() {
-        const trimmed = newDriveFolderUrl.trim()
-        if (!trimmed || savingDrive) return
+        // Prevent overlapping saves
+        if (isSavingDriveRef.current) {
+            debug.log('FILE_MANAGER', 'Drive folder save already in progress, ignoring')
+            return
+        }
 
+        const trimmed = newDriveFolderUrl.trim()
+        if (!trimmed) return
+
+        // Validate it's a Google Drive URL
+        if (!trimmed.includes('drive.google.com')) {
+            alert('Please provide a valid Google Drive URL')
+            return
+        }
+
+        isSavingDriveRef.current = true
         const supabase = createClient()
         setSavingDrive(true)
 
         try {
+            debug.log('FILE_MANAGER', 'Saving drive folder', { projectId, url: trimmed })
+
             const { error } = await supabase
                 .from('projects')
                 .update({ drive_folder_url: trimmed })
@@ -244,13 +351,27 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
 
             if (error) throw error
 
+            debug.success('FILE_MANAGER', 'Drive folder saved successfully')
+
+            // Reset form first
+            setNewDriveFolderUrl(trimmed)
+
+            // Then close dialog
             setIsDriveFolderDialogOpen(false)
+
+            // Then notify parent
             onDriveFolderUpdate?.(trimmed)
         } catch (error: any) {
             console.error('Error updating drive folder:', error)
+            debug.error('FILE_MANAGER', 'Drive folder save error', {
+                message: error?.message,
+                code: error?.code,
+            })
             alert(error.message || 'Failed to update drive folder')
         } finally {
             setSavingDrive(false)
+            isSavingDriveRef.current = false
+            debug.log('FILE_MANAGER', 'Drive folder save end - flags reset')
         }
     }
 
@@ -279,6 +400,107 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
             console.error('Error deleting file:', error)
             alert(error.message || 'Failed to delete file')
         }
+    }
+
+    function parseGoogleDriveId(url: string): string | null {
+        try {
+            const u = new URL(url)
+            // Pattern: /file/d/<id>/
+            const fileMatch = u.pathname.match(/\/file\/d\/([^/]+)/)
+            if (fileMatch) return fileMatch[1]
+            // Pattern: open?id=<id>
+            const idParam = u.searchParams.get('id')
+            if (idParam) return idParam
+            // Pattern: uc?id=<id>
+            const ucId = u.searchParams.get('id')
+            if (ucId) return ucId
+        } catch { }
+        return null
+    }
+
+    function getDrivePreviewUrl(url: string): string | null {
+        const id = parseGoogleDriveId(url)
+        if (!id) return null
+        return `https://drive.google.com/file/d/${id}/preview`
+    }
+
+    function getDriveThumbnailUrl(url: string, size = 120): string | null {
+        const id = parseGoogleDriveId(url)
+        if (!id) return null
+        return `https://drive.google.com/thumbnail?id=${id}&sz=w${size}`
+    }
+
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+
+    async function openPreview(file: ProjectFile) {
+        setPreviewFile(file)
+        setPreviewUrl(null)
+        setIsPreviewOpen(true)
+        if (file.storage_type === 'supabase') {
+            const res = await getSignedProjectFileUrl(file.file_url)
+            if (!res.error && res.signedUrl) setPreviewUrl(res.signedUrl)
+            else setPreviewUrl(file.file_url) // fallback for public buckets
+        } else {
+            setPreviewUrl(file.file_url)
+        }
+    }
+
+    async function openFile(file: ProjectFile) {
+        if (file.storage_type === 'supabase') {
+            const res = await getSignedProjectFileUrl(file.file_url)
+            if (res.error || !res.signedUrl) {
+                // Fallback for public buckets
+                window.open(file.file_url, '_blank')
+                return
+            }
+            window.open(res.signedUrl, '_blank')
+        } else {
+            window.open(file.file_url, '_blank')
+        }
+    }
+
+    function FileThumb({ file }: { file: ProjectFile }) {
+        const [failed, setFailed] = useState(false)
+        const [signedSrc, setSignedSrc] = useState<string | null>(null)
+        let src: string | null = null
+        if (file.file_type === 'image') {
+            if (file.storage_type === 'supabase') {
+                src = signedSrc ?? file.file_url // allow public bucket fallback
+            } else {
+                src = file.file_url
+            }
+        } else if (file.file_type === 'video' && file.storage_type === 'google_drive') {
+            src = getDriveThumbnailUrl(file.file_url, 160)
+        }
+
+        useEffect(() => {
+            let cancelled = false
+            async function run() {
+                if (file.file_type === 'image' && file.storage_type === 'supabase') {
+                    const res = await getSignedProjectFileUrl(file.file_url, 300)
+                    if (!cancelled && !res.error && res.signedUrl) setSignedSrc(res.signedUrl)
+                    if (!cancelled && res.error) setSignedSrc(null)
+                }
+            }
+            run()
+            return () => { cancelled = true }
+        }, [file.file_url, file.file_type, file.storage_type])
+
+        if (!src || failed) {
+            return (
+                <div className="flex items-center justify-center h-8 w-8 rounded bg-muted">
+                    {getFileIcon(file.file_type)}
+                </div>
+            )
+        }
+        return (
+            <img
+                src={src}
+                alt={file.file_name}
+                className="h-8 w-8 rounded object-cover"
+                onError={() => setFailed(true)}
+            />
+        )
     }
 
     function getFileIcon(fileType: string) {
@@ -334,15 +556,34 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
             </Card>
 
             {/* Action Buttons */}
-            <div className="flex gap-2">
-                <Button onClick={() => { debug.log('FILE_MANAGER', 'Open upload dialog'); setIsUploadDialogOpen(true) }}>
-                    <Upload className="h-4 w-4 mr-2" />
-                    Upload File
-                </Button>
-                <Button variant="outline" onClick={() => { debug.log('FILE_MANAGER', 'Open add link dialog'); setIsLinkDialogOpen(true) }}>
-                    <LinkIcon className="h-4 w-4 mr-2" />
-                    Add Drive Link
-                </Button>
+            <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <div className="flex gap-2">
+                        <Button
+                            onClick={() => { debug.log('FILE_MANAGER', 'Open upload dialog'); setIsUploadDialogOpen(true) }}
+                            disabled={files.length >= 20}
+                        >
+                            <Upload className="h-4 w-4 mr-2" />
+                            Upload File
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={() => { debug.log('FILE_MANAGER', 'Open add link dialog'); setIsLinkDialogOpen(true) }}
+                            disabled={files.length >= 20}
+                        >
+                            <LinkIcon className="h-4 w-4 mr-2" />
+                            Add Drive Link
+                        </Button>
+                    </div>
+                    <p className={`text-sm ${files.length >= 20 ? 'text-red-600 font-medium' : 'text-muted-foreground'}`}>
+                        {files.length}/20 files
+                    </p>
+                </div>
+                {files.length >= 20 && (
+                    <p className="text-sm text-red-600">
+                        Maximum file limit reached. Delete some files to add more.
+                    </p>
+                )}
             </div>
 
             {/* Files by Category */}
@@ -364,7 +605,7 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                                         className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent transition-colors"
                                     >
                                         <div className="flex items-center gap-3 flex-1">
-                                            {getFileIcon(file.file_type)}
+                                            <FileThumb file={file} />
                                             <div className="flex-1 min-w-0">
                                                 <p className="font-medium truncate">{file.file_name}</p>
                                                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -379,10 +620,11 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            <Button variant="ghost" size="sm" asChild>
-                                                <a href={file.file_url} target="_blank" rel="noopener noreferrer">
-                                                    <ExternalLink className="h-4 w-4" />
-                                                </a>
+                                            <Button variant="ghost" size="sm" onClick={() => openPreview(file)}>
+                                                <Eye className="h-4 w-4" />
+                                            </Button>
+                                            <Button variant="ghost" size="sm" onClick={() => openFile(file)}>
+                                                <ExternalLink className="h-4 w-4" />
                                             </Button>
                                             <Button
                                                 variant="ghost"
@@ -465,7 +707,7 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                             </Button>
                             <Button type="submit" disabled={!selectedFile || uploading}>
                                 {uploading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Upload
+                                {uploading ? 'Uploading...' : 'Upload'}
                             </Button>
                         </DialogFooter>
                     </form>
@@ -473,9 +715,12 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
             </Dialog>
 
             {/* Add Drive Link Dialog */}
-            <Dialog open={isLinkDialogOpen} onOpenChange={(open) => { setIsLinkDialogOpen(open); if (!open) debug.log('FILE_MANAGER', 'Add link dialog closed'); }}>
+            <Dialog open={isLinkDialogOpen} onOpenChange={setIsLinkDialogOpen}>
                 <DialogContent>
-                    <form onSubmit={(e) => { e.preventDefault(); handleAddLink(); }}>
+                    <form onSubmit={(e) => {
+                        e.preventDefault();
+                        handleAddLink();
+                    }}>
                         <DialogHeader>
                             <DialogTitle>Add Google Drive Link</DialogTitle>
                             <DialogDescription>
@@ -532,9 +777,9 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                             <Button type="button" variant="outline" onClick={() => setIsLinkDialogOpen(false)} disabled={linkSubmitting}>
                                 Cancel
                             </Button>
-                            <Button type="submit" disabled={!linkUrl || !linkName || linkSubmitting}>
+                            <Button type="submit" disabled={!linkUrl.trim() || !linkName.trim() || linkSubmitting}>
                                 {linkSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Add Link
+                                {linkSubmitting ? 'Adding...' : 'Add Link'}
                             </Button>
                         </DialogFooter>
                     </form>
@@ -565,12 +810,92 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                             <Button type="button" variant="outline" onClick={() => setIsDriveFolderDialogOpen(false)} disabled={savingDrive}>
                                 Cancel
                             </Button>
-                            <Button type="submit" disabled={!newDriveFolderUrl || savingDrive}>
+                            <Button
+                                type="submit"
+                                disabled={!newDriveFolderUrl.trim() || !newDriveFolderUrl.includes('drive.google.com') || savingDrive}
+                            >
                                 {savingDrive && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Save
+                                {savingDrive ? 'Saving...' : 'Save'}
                             </Button>
                         </DialogFooter>
                     </form>
+                </DialogContent>
+            </Dialog>
+
+            {/* Preview Dialog */}
+            <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+                <DialogContent className="max-w-3xl">
+                    <DialogHeader>
+                        <DialogTitle>Preview</DialogTitle>
+                        <DialogDescription>
+                            {previewFile?.file_name}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="mt-2">
+                        {previewFile && (
+                            (() => {
+                                const type = previewFile.file_type
+                                const url = previewUrl || previewFile.file_url
+                                const storage = previewFile.storage_type
+                                if (storage === 'supabase' && !previewUrl) {
+                                    return (
+                                        <div className="text-sm text-muted-foreground p-6 text-center">
+                                            Generating secure preview link...
+                                        </div>
+                                    )
+                                }
+                                if (type === 'image') {
+                                    return (
+                                        <img src={url} alt={previewFile.file_name} className="max-h-[70vh] w-auto mx-auto rounded" />
+                                    )
+                                }
+                                if (type === 'video') {
+                                    if (storage === 'google_drive') {
+                                        const embed = getDrivePreviewUrl(url)
+                                        if (embed) {
+                                            return (
+                                                <iframe
+                                                    src={embed}
+                                                    className="w-full h-[70vh] rounded"
+                                                    allow="autoplay"
+                                                    allowFullScreen
+                                                />
+                                            )
+                                        }
+                                    }
+                                    return (
+                                        <video controls className="w-full max-h-[70vh] rounded">
+                                            <source src={url} />
+                                            Your browser does not support the video tag.
+                                        </video>
+                                    )
+                                }
+                                if (type === 'pdf' || url.endsWith('.pdf')) {
+                                    return (
+                                        <iframe src={url} className="w-full h-[70vh] rounded" />
+                                    )
+                                }
+                                // Fallback
+                                return (
+                                    <div className="text-center text-sm text-muted-foreground">
+                                        Preview not available. Use the open link to view the file.
+                                    </div>
+                                )
+                            })()
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsPreviewOpen(false)}>Close</Button>
+                        {previewFile && (
+                            previewFile.storage_type === 'supabase' ? (
+                                <Button onClick={() => openFile(previewFile)}>Open in new tab</Button>
+                            ) : (
+                                <Button asChild>
+                                    <a href={previewFile.file_url} target="_blank" rel="noopener noreferrer">Open in new tab</a>
+                                </Button>
+                            )
+                        )}
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>

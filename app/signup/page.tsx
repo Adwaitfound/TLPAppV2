@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -8,8 +8,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import Link from 'next/link';
-import { Video, Users, Briefcase, Shield } from 'lucide-react';
+import { Users, Briefcase, Shield } from 'lucide-react';
 import type { UserRole } from '@/types';
+import { debug } from '@/lib/debug';
 
 function SignupForm() {
     const [email, setEmail] = useState('');
@@ -22,6 +23,14 @@ function SignupForm() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const role = (searchParams.get('role') || 'client') as UserRole;
+
+    const describeError = (err: any) => {
+        const code = err?.code || err?.status
+        if (code === 'user_already_exists') return 'An account with this email already exists.'
+        if (code === 'rate_limit_exceeded') return 'Too many attempts. Please wait and try again.'
+        if (err?.message?.toLowerCase().includes('password')) return 'Password is too weak. Please choose a stronger one.'
+        return err?.message || 'Failed to create account. Please try again.'
+    }
 
     const roleConfig: Record<UserRole, {
         title: string;
@@ -60,6 +69,8 @@ function SignupForm() {
         try {
             const supabase = createClient();
 
+            debug.log('SIGNUP', 'Starting signup', { email, role })
+
             // Create auth user
             const { data: authData, error: authError } = await supabase.auth.signUp({
                 email,
@@ -76,10 +87,12 @@ function SignupForm() {
             if (authError) throw authError;
             if (!authData.user) throw new Error('Failed to create user account');
 
+            debug.success('SIGNUP', 'Auth user created', { userId: authData.user.id })
+
             // Create user record in public.users
             const { error: userError } = await supabase
                 .from('users')
-                .insert({
+                .upsert({
                     id: authData.user.id,
                     email: email,
                     full_name: fullName,
@@ -88,6 +101,8 @@ function SignupForm() {
                 });
 
             if (userError) throw userError;
+
+            debug.success('SIGNUP', 'User profile stored', { role, email })
 
             // Create role-specific records
             if (role === 'client') {
@@ -105,6 +120,7 @@ function SignupForm() {
                     });
 
                 if (clientError) throw clientError;
+                debug.success('SIGNUP', 'Client record created', { email })
             }
 
             // Redirect based on role
@@ -118,7 +134,9 @@ function SignupForm() {
 
         } catch (err: any) {
             console.error('Signup error:', err);
-            setError(err.message || 'Failed to create account. Please try again.');
+            const message = describeError(err);
+            debug.error('SIGNUP', 'Signup failed', { message, code: err?.code })
+            setError(message);
         } finally {
             setLoading(false);
         }

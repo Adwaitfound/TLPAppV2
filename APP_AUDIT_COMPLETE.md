@@ -70,11 +70,10 @@ Conducted comprehensive audit of all dashboard pages and functionality. Fixed ha
    - Shows "Loading..." instead of fake email
    - Added debug logging to logout
 
-### 📋 Test Data (Intentional - No Changes)
-1. **Sample Data SQL** (`scripts/add-sample-data.sql`)
-   - Hardcoded UUIDs for demo clients/projects
-   - Used for development/testing only
-   - Not executed automatically
+### 📋 Data Setup
+1. **Sample Data**
+   - Removed. The app uses your live Supabase data only.
+   - `scripts/add-sample-data.sql` is disabled to prevent accidental use.
 
 2. **Setup Scripts** (`CREATE_ADMIN_USER.sql`, etc.)
    - Example admin@test.com is documentation

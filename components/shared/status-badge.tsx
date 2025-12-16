@@ -9,6 +9,7 @@ export function StatusBadge({ status }: StatusBadgeProps) {
   const getVariant = (status: string) => {
     switch (status) {
       case 'completed':
+      case 'done':
       case 'paid':
       case 'active':
         return 'success'
@@ -21,6 +22,7 @@ export function StatusBadge({ status }: StatusBadgeProps) {
       case 'draft':
         return 'warning'
       case 'stuck':
+      case 'blocked':
         return 'destructive'
       case 'cancelled':
       case 'overdue':

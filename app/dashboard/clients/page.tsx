@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/table"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Plus, Search, Mail, Phone, MapPin, Building2, Loader2, Copy, CheckCircle2, Eye, FolderKanban, DollarSign, Trash2 } from "lucide-react"
+import { Plus, Search, Mail, Phone, MapPin, Building2, Loader2, Copy, CheckCircle2, Eye, Trash2 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import type { Client, Project, Invoice, ServiceType } from "@/types"
 import { SERVICE_TYPES } from "@/types"
