@@ -212,7 +212,7 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
             // Reset form
             setSelectedFile(null)
             setUploadDescription("")
-            setUploadCategory("document")
+            setUploadCategory("other")
             setUploading(false)
 
             debug.success('FILE_MANAGER', 'Upload saved, added to list, dialog closed')
