@@ -909,8 +909,8 @@ function ProjectsPageContent() {
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium">{date.getDate()}</span>
                         <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="xs" className="h-6 px-2" onClick={() => onCreate(date)}>+ Add</Button>
-                          <Button variant="ghost" size="xs" className="h-6 px-2" onClick={() => onOpenDate(date, eventsForDate(date))}>Open</Button>
+                          <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => onCreate(date)}>+ Add</Button>
+                          <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => onOpenDate(date, eventsForDate(date))}>Open</Button>
                         </div>
                       </div>
                       <div className="space-y-2">
@@ -919,13 +919,13 @@ function ProjectsPageContent() {
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-xs font-medium truncate">{ev.title}</span>
                               <div className="flex items-center gap-1">
-                                <Button variant="ghost" size="xs" className="h-6 px-2" onClick={() => onDelete(ev.id)}>Del</Button>
-                                <Button variant="ghost" size="xs" className="h-6 px-2" onClick={() => onUpdate({ ...ev, status: ev.status === 'published' ? 'scheduled' : 'published' })}>
+                                <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => onDelete(ev.id)}>Del</Button>
+                                <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => onUpdate({ ...ev, status: ev.status === 'published' ? 'scheduled' : 'published' })}>
                                   {ev.status === 'published' ? 'Unpublish' : 'Publish'}
                                 </Button>
                                 <Button
                                   variant="ghost"
-                                  size="xs"
+                                  size="sm"
                                   className="h-6 px-2"
                                   onClick={() => {
                                     const url = prompt('Paste image/video URL')
