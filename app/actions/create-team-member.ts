@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 export async function createTeamMember(formData: {
     email: string
     full_name: string
-    role: 'admin' | 'project_manager'
+    role: 'admin' | 'project_manager' | 'employee'
     password: string
 }) {
     try {

@@ -142,5 +142,5 @@ export const debug = new DebugLogger()
 
 // Make available globally in browser console
 if (typeof window !== 'undefined') {
-  ;(window as any).debug = debug
+  ; (window as any).debug = debug
 }

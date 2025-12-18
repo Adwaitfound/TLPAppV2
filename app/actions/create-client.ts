@@ -107,6 +107,7 @@ export async function createClientAccount(formData: ClientFormData): Promise<Cli
                     email: formData.email,
                     full_name: formData.contact_person,
                     role: 'client',
+                    status: 'approved',
                     company_name: formData.company_name,
                 })
 

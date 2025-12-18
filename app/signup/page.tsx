@@ -11,6 +11,8 @@ import Link from 'next/link';
 import { Users, Briefcase, Shield } from 'lucide-react';
 import type { UserRole } from '@/types';
 import { debug } from '@/lib/debug';
+import { registerPendingUser } from '@/app/actions/register-pending-user';
+import { adminCreateUserSignup } from '@/app/actions/admin-signup';
 
 function SignupForm() {
     const [email, setEmail] = useState('');
@@ -71,69 +73,84 @@ function SignupForm() {
 
             debug.log('SIGNUP', 'Starting signup', { email, role })
 
-            // Create auth user
-            const { data: authData, error: authError } = await supabase.auth.signUp({
-                email,
-                password,
-                options: {
-                    data: {
-                        full_name: fullName,
-                        company_name: companyName,
-                        role: role,
-                    },
-                },
-            });
+            let authUserId: string | null = null
 
-            if (authError) throw authError;
-            if (!authData.user) throw new Error('Failed to create user account');
-
-            debug.success('SIGNUP', 'Auth user created', { userId: authData.user.id })
-
-            // Create user record in public.users
-            const { error: userError } = await supabase
-                .from('users')
-                .upsert({
-                    id: authData.user.id,
-                    email: email,
-                    full_name: fullName,
-                    role: role,
-                    company_name: companyName || null,
-                });
-
-            if (userError) throw userError;
-
-            debug.success('SIGNUP', 'User profile stored', { role, email })
-
-            // Create role-specific records
             if (role === 'client') {
-                const { error: clientError } = await supabase
-                    .from('clients')
-                    .insert({
-                        user_id: authData.user.id,
-                        company_name: companyName || fullName,
-                        contact_person: fullName,
-                        email: email,
-                        phone: phone || null,
-                        status: 'active',
-                        total_projects: 0,
-                        total_revenue: 0,
-                    });
-
-                if (clientError) throw clientError;
-                debug.success('SIGNUP', 'Client record created', { email })
+                // Use server-side admin signup to avoid email confirmation blocker
+                const res = await adminCreateUserSignup({
+                    email,
+                    password,
+                    full_name: fullName,
+                    company_name: companyName || null,
+                    role,
+                })
+                if (!res.success || !res.userId) {
+                    throw new Error(res.error || 'Failed to create account')
+                }
+                authUserId = res.userId
+            } else {
+                // Default client-side signup for non-client roles
+                const { data: authData, error: authError } = await supabase.auth.signUp({
+                    email,
+                    password,
+                    options: {
+                        data: {
+                            full_name: fullName,
+                            company_name: companyName,
+                            role: role,
+                        },
+                    },
+                })
+                if (authError) throw authError
+                if (!authData.user) throw new Error('Failed to create user account')
+                authUserId = authData.user.id
             }
+
+            debug.success('SIGNUP', 'Auth user created', { userId: authUserId })
+
+            // Store user profile: for clients, use service-role directly to avoid RLS/session issues
+            if (role === 'client') {
+                const res = await registerPendingUser({
+                    id: authUserId!,
+                    email,
+                    full_name: fullName,
+                    role,
+                    company_name: companyName || null,
+                })
+                if (!res.success) throw new Error(res.error || 'Failed to register pending user')
+                debug.success('SIGNUP', 'Pending client profile stored via server action', { email })
+            } else {
+                const { error: userError } = await supabase
+                    .from('users')
+                    .upsert({
+                        id: authUserId!,
+                        email: email,
+                        full_name: fullName,
+                        role: role,
+                        company_name: companyName || null,
+                        status: 'approved',
+                    })
+                if (userError) {
+                    throw new Error(userError.message)
+                }
+                debug.success('SIGNUP', 'User profile stored', { role, email })
+            }
+
+            // Do not create clients on signup; created on admin approval
 
             // Redirect based on role
             if (role === 'admin') {
                 router.push('/dashboard');
             } else if (role === 'client') {
-                router.push('/dashboard/client');
+                setError('Account created. Pending admin approval — you will be able to sign in once approved.')
+                // Small delay then go to login
+                setTimeout(() => router.push('/login?role=client'), 1500)
             } else {
                 router.push('/dashboard/employee');
             }
 
         } catch (err: any) {
-            console.error('Signup error:', err);
+            console.error('Signup error:', err?.message || err);
             const message = describeError(err);
             debug.error('SIGNUP', 'Signup failed', { message, code: err?.code })
             setError(message);

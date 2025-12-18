@@ -9,6 +9,9 @@ import { Label } from "@/components/ui/label"
 import { Video } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { debug } from "@/lib/debug"
+import { forceConfirmEmail } from "@/app/actions/force-confirm-email"
+import { registerPendingUser } from "@/app/actions/register-pending-user"
+import type { UserRole } from "@/types"
 
 export default function LoginPage() {
     const [email, setEmail] = useState("")
@@ -74,7 +77,7 @@ export default function LoginPage() {
 
             console.log('Step 1: Attempting login with:', email)
             debug.log('LOGIN', 'Attempting login', { email })
-            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            let { data: authData, error: authError } = await supabase.auth.signInWithPassword({
                 email,
                 password,
             })
@@ -85,8 +88,21 @@ export default function LoginPage() {
             })
 
             if (authError) {
-                console.error('Auth error:', authError)
-                throw authError
+                // Auto-confirm email if required, then retry once
+                if ((authError as any)?.code === 'email_not_confirmed') {
+                    debug.warn('LOGIN', 'Email not confirmed, attempting server-side confirm', { email })
+                    const res = await forceConfirmEmail(email)
+                    if (res.success) {
+                        debug.success('LOGIN', 'Email confirmed server-side, retrying login', { userId: res.userId })
+                        const retry = await supabase.auth.signInWithPassword({ email, password })
+                        authData = retry.data
+                        authError = retry.error as any
+                    }
+                }
+                if (authError) {
+                    console.error('Auth error:', authError)
+                    throw authError
+                }
             }
 
             if (!authData.user) {
@@ -115,37 +131,64 @@ export default function LoginPage() {
                     code: userError.code,
                     details: userError.details
                 })
-                throw new Error('Failed to fetch user profile. Please try again or contact support.')
             }
 
             // Handle case where user doesn't exist in users table
-            if (!usersData || usersData.length === 0) {
-                console.error('User profile not found in database for:', authData.user.id)
-                // Create a default user profile if it doesn't exist
-                console.log('Step 6: Creating user profile...')
-                const { error: insertError } = await supabase
+            let userData = usersData && usersData.length > 0 ? usersData[0] : null
+            if (!userData) {
+                console.error('User profile not found by id; trying email lookup:', authData.user.id)
+                const { data: byEmail } = await supabase
                     .from('users')
-                    .insert({
+                    .select('*')
+                    .eq('email', authData.user.email!)
+                    .limit(1)
+                if (byEmail && byEmail.length > 0) {
+                    userData = byEmail[0]
+                } else {
+                    // Last resort: create via server action with service role to avoid RLS issues
+                    const role: UserRole = (authData.user.user_metadata?.role as UserRole) || 'project_manager'
+                    const res = await registerPendingUser({
                         id: authData.user.id,
-                        email: authData.user.email,
+                        email: authData.user.email!,
                         full_name: authData.user.user_metadata?.full_name || email.split('@')[0],
-                        role: 'project_manager'
+                        role,
+                        company_name: authData.user.user_metadata?.company_name || null,
                     })
-
-                if (insertError) {
-                    console.error('Failed to create user profile:', insertError)
-                    throw new Error('Failed to create user profile. Please contact support.')
+                    if (!res.success) {
+                        console.error('Failed to create user profile via server action:', res.error)
+                        throw new Error('Failed to create user profile. Please contact support.')
+                    }
+                    // Fetch newly created profile
+                    const { data: created } = await supabase
+                        .from('users')
+                        .select('*')
+                        .eq('id', authData.user.id)
+                        .limit(1)
+                    userData = created?.[0] || null
+                    if (!userData) {
+                        throw new Error('Profile creation completed but could not load profile. Please retry.')
+                    }
                 }
-
-                console.log('Step 7: User profile created, redirecting to employee dashboard')
-                router.push('/dashboard/employee')
-                clearTimeout(timeout)
-                return
             }
 
-            const userData = usersData[0]
+            // userData is ensured above
             console.log('Step 6: User data fetched, redirecting based on role:', userData.role)
             debug.success('LOGIN', 'Profile fetched', { role: userData.role, email: userData.email })
+
+            // Block client accounts until an admin approves
+            if (userData.role === 'client') {
+                const status = (userData as any).status || 'pending'
+                if (status !== 'approved') {
+                    const reason = status === 'rejected'
+                        ? 'Your account was rejected. Please contact support.'
+                        : 'Your account is pending admin approval. Please wait for an approval email.'
+                    debug.warn('LOGIN', 'Blocked pending/rejected client', { status, email: userData.email })
+                    await supabase.auth.signOut()
+                    clearTimeout(timeout)
+                    setError(reason)
+                    return
+                }
+            }
 
             // Small delay to ensure session is properly set before redirect
             await new Promise(resolve => setTimeout(resolve, 500))

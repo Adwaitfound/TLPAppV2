@@ -7,14 +7,30 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
-import { DollarSign, FolderKanban, FileText, Plus, Calendar, Users, TrendingUp, AlertCircle, CheckCircle2, Receipt } from "lucide-react"
+import { DollarSign, FolderKanban, FileText, Plus, Calendar, Users, TrendingUp, AlertCircle, CheckCircle2, Receipt, Bell, Clock } from "lucide-react"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { createClient } from "@/lib/supabase/client"
 import { useAuth } from "@/contexts/auth-context"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import type { Project, Client, Invoice, Milestone } from "@/types"
 import { SERVICE_TYPES, type ServiceType } from "@/types"
+import { reviewProjectProposal } from "@/app/actions/employee-tasks"
+import { approveUserAccount } from "@/app/actions/approve-user"
+import { grantAdminByEmail } from "@/app/actions/grant-admin"
+import { forceConfirmEmail } from "@/app/actions/force-confirm-email"
+
+type PendingUser = {
+    id: string
+    email: string
+    full_name?: string | null
+    role: string
+    company_name?: string | null
+    created_at?: string
+    status?: string | null
+}
 
 export default function AdminDashboard() {
     const { user, loading: authLoading } = useAuth()
@@ -23,10 +39,24 @@ export default function AdminDashboard() {
     const [invoices, setInvoices] = useState<Invoice[]>([])
     const [clients, setClients] = useState<Client[]>([])
     const [milestones, setMilestones] = useState<Milestone[]>([])
+    const [proposals, setProposals] = useState<any[]>([])
+    const [proposalSelections, setProposalSelections] = useState<Record<string, string>>({})
+    const [proposalLoading, setProposalLoading] = useState(false)
+    const [proposalSubmitting, setProposalSubmitting] = useState(false)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [timePeriodFilter, setTimePeriodFilter] = useState("all")
     const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+    const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([])
+    const [pendingUsersLoading, setPendingUsersLoading] = useState(false)
+    const [pendingActionUserId, setPendingActionUserId] = useState<string | null>(null)
+    const [devToolsOpen, setDevToolsOpen] = useState(false)
+    const [grantAdminEmail, setGrantAdminEmail] = useState("")
+    const [grantingAdmin, setGrantingAdmin] = useState(false)
+    const [bannerEmail, setBannerEmail] = useState("")
+    const [bannerProcessing, setBannerProcessing] = useState(false)
+    const [confirmEmailInput, setConfirmEmailInput] = useState("")
+    const [confirmingEmail, setConfirmingEmail] = useState(false)
 
     const [stats, setStats] = useState({
         totalRevenue: 0,
@@ -145,6 +175,33 @@ export default function AdminDashboard() {
                     completedProjects,
                     avgProjectValue,
                 })
+
+                // Fetch pending project proposals
+                setProposalLoading(true)
+                const { data: proposalData, error: proposalError } = await supabase
+                    .from('employee_tasks')
+                    .select('id, title, proposed_project_name, proposed_project_status, proposed_project_notes, user_id, created_at, projects(name), users:users!employee_tasks_user_id_fkey(full_name, email)')
+                    .not('proposed_project_name', 'is', null)
+                    .eq('proposed_project_status', 'pending')
+                    .order('created_at', { ascending: false })
+
+                if (!proposalError) {
+                    setProposals(proposalData || [])
+                }
+                setProposalLoading(false)
+
+                // Fetch pending users awaiting approval
+                setPendingUsersLoading(true)
+                const { data: pendingUsersData, error: pendingUsersError } = await supabase
+                    .from('users')
+                    .select('id, email, full_name, role, company_name, created_at, status')
+                    .eq('status', 'pending')
+                    .order('created_at', { ascending: true })
+
+                if (!pendingUsersError) {
+                    setPendingUsers(pendingUsersData || [])
+                }
+                setPendingUsersLoading(false)
             } catch (error) {
                 console.error('Error fetching dashboard data:', error)
                 setError('Something went wrong while loading your dashboard. Please refresh.')
@@ -228,6 +285,79 @@ export default function AdminDashboard() {
 
     const filteredStats = getFilteredStats()
 
+    const handleUserApproval = async (userId: string, decision: 'approved' | 'rejected') => {
+        setPendingActionUserId(userId)
+        const result = await approveUserAccount({ userId, decision })
+
+        if (!result.success) {
+            console.error('Failed to update user status', result.error)
+            setError(result.error || 'Could not update user status. Please retry.')
+        } else {
+            setPendingUsers(prev => prev.filter(user => user.id !== userId))
+        }
+
+        setPendingActionUserId(null)
+    }
+
+    const handleProposalDecision = async (taskId: string, decision: 'approved' | 'rejected') => {
+        setProposalSubmitting(true)
+        const selectedProject = proposalSelections[taskId]
+        const projectId = selectedProject && selectedProject !== 'none' ? selectedProject : undefined
+        const result = await reviewProjectProposal({ taskId, decision, projectId })
+        if (result.error) {
+            alert(result.error)
+        } else {
+            // refresh proposals list
+            const supabase = createClient()
+            const { data: proposalData } = await supabase
+                .from('employee_tasks')
+                .select('id, title, proposed_project_name, proposed_project_status, proposed_project_notes, user_id, created_at, projects(name), users:users!employee_tasks_user_id_fkey(full_name, email)')
+                .not('proposed_project_name', 'is', null)
+                .eq('proposed_project_status', 'pending')
+                .order('created_at', { ascending: false })
+            setProposals(proposalData || [])
+        }
+        setProposalSubmitting(false)
+    }
+
+    const handleConfirmAndApproveByEmail = async () => {
+        if (!bannerEmail) return
+        setBannerProcessing(true)
+        try {
+            const supabase = createClient()
+            const confirm = await forceConfirmEmail(bannerEmail)
+            if (!confirm.success) {
+                setError(confirm.error || 'Failed to confirm email')
+                setBannerProcessing(false)
+                return
+            }
+            const { data: userRow } = await supabase
+                .from('users')
+                .select('id, email, status')
+                .eq('email', bannerEmail)
+                .limit(1)
+                .single()
+            if (!userRow?.id) {
+                setError('User not found in users table')
+                setBannerProcessing(false)
+                return
+            }
+            const result = await approveUserAccount({ userId: userRow.id, decision: 'approved' })
+            if (!result.success) {
+                setError(result.error || 'Failed to approve user')
+                setBannerProcessing(false)
+                return
+            }
+            setPendingUsers(prev => prev.filter(u => u.email !== bannerEmail))
+            setBannerEmail('')
+            setError(null)
+        } catch (e: any) {
+            setError(e?.message || 'Unexpected error while confirming & approving')
+        } finally {
+            setBannerProcessing(false)
+        }
+    }
+
     if (authLoading || loading) {
         return (
             <div className="flex items-center justify-center h-96">
@@ -275,7 +405,13 @@ export default function AdminDashboard() {
             {/* Header */}
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
-                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Dashboard</h1>
+                    <h1
+                        className="text-2xl md:text-3xl font-bold tracking-tight select-none"
+                        onDoubleClick={() => setDevToolsOpen(true)}
+                        title=""
+                    >
+                        Dashboard
+                    </h1>
                     <p className="text-sm md:text-base text-muted-foreground mt-1">
                         Welcome back! Here&apos;s an overview of your business.
                     </p>
@@ -295,6 +431,80 @@ export default function AdminDashboard() {
                     </Button>
                 </div>
             </div>
+
+            {/* Hidden Admin Tools Dialog (double-click the Dashboard title) */}
+            <Dialog open={devToolsOpen} onOpenChange={setDevToolsOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Admin Tools</DialogTitle>
+                        <DialogDescription>Grant admin or confirm email for a user</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <div className="space-y-2">
+                            <label htmlFor="grant-admin-email" className="text-sm">Grant Admin by Email</label>
+                            <Input
+                                id="grant-admin-email"
+                                value={grantAdminEmail}
+                                onChange={(e) => setGrantAdminEmail(e.target.value)}
+                                placeholder="user@example.com"
+                                type="email"
+                            />
+                        </div>
+                        <div className="flex gap-2">
+                            <Button
+                                disabled={grantingAdmin || !grantAdminEmail}
+                                onClick={async () => {
+                                    setGrantingAdmin(true)
+                                    const res = await grantAdminByEmail(grantAdminEmail)
+                                    if (!res.success) {
+                                        setError(res.error || 'Failed to grant admin')
+                                    } else {
+                                        setError(null)
+                                        setGrantAdminEmail('')
+                                    }
+                                    setGrantingAdmin(false)
+                                }}
+                            >
+                                {grantingAdmin ? 'Granting…' : 'Grant Admin'}
+                            </Button>
+                        </div>
+                        <div className="space-y-2 pt-3 border-t">
+                            <label htmlFor="confirm-email" className="text-sm">Force Confirm Email</label>
+                            <Input
+                                id="confirm-email"
+                                value={confirmEmailInput}
+                                onChange={(e) => setConfirmEmailInput(e.target.value)}
+                                placeholder="client@example.com"
+                                type="email"
+                            />
+                        </div>
+                        <div className="flex gap-2">
+                            <Button
+                                variant="secondary"
+                                disabled={confirmingEmail || !confirmEmailInput}
+                                onClick={async () => {
+                                    setConfirmingEmail(true)
+                                    const res = await forceConfirmEmail(confirmEmailInput)
+                                    if (!res.success) {
+                                        setError(res.error || 'Failed to confirm email')
+                                    } else {
+                                        setError(null)
+                                        setConfirmEmailInput('')
+                                    }
+                                    setConfirmingEmail(false)
+                                }}
+                            >
+                                {confirmingEmail ? 'Confirming…' : 'Confirm Email'}
+                            </Button>
+                            <Button variant="outline" onClick={() => setDevToolsOpen(false)}>Close</Button>
+                        </div>
+                        {error && (
+                            <p className="text-sm text-destructive">{error}</p>
+                        )}
+                        <p className="text-xs text-muted-foreground">Hint: double-click the “Dashboard” title to open this.</p>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             {/* Time Period Filter */}
             <div className="flex gap-2 flex-wrap">
@@ -316,6 +526,31 @@ export default function AdminDashboard() {
                     </Button>
                 ))}
             </div>
+
+            {/* Email Confirmation Banner */}
+            <Card className="border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20">
+                <CardHeader className="space-y-1">
+                    <CardTitle className="text-sm md:text-base">Unconfirmed accounts</CardTitle>
+                    <CardDescription className="text-xs md:text-sm">
+                        Some legacy signups may still require email confirmation. Quickly confirm and approve a client by email.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col sm:flex-row gap-2">
+                    <Input
+                        placeholder="client@example.com"
+                        type="email"
+                        value={bannerEmail}
+                        onChange={(e) => setBannerEmail(e.target.value)}
+                        className="sm:max-w-xs"
+                    />
+                    <Button
+                        onClick={handleConfirmAndApproveByEmail}
+                        disabled={bannerProcessing || !bannerEmail}
+                    >
+                        {bannerProcessing ? 'Processing…' : 'Confirm + Approve'}
+                    </Button>
+                </CardContent>
+            </Card>
 
             {/* Stats Grid */}
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 auto-rows-max">
@@ -370,7 +605,168 @@ export default function AdminDashboard() {
                     trend="up"
                     icon={CheckCircle2}
                 />
+                <StatCard
+                    title="Pending Approvals"
+                    value={pendingUsers.length.toString()}
+                    change="Awaiting admin review"
+                    trend="neutral"
+                    icon={Bell}
+                />
             </div>
+
+            {/* Pending Account Approvals */}
+            <Card>
+                <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div>
+                        <CardTitle className="text-lg md:text-xl">Account Approvals</CardTitle>
+                        <CardDescription className="text-xs md:text-sm">Approve or reject newly registered users</CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="flex items-center gap-1">
+                            <Clock className="h-4 w-4" />
+                            {pendingUsers.length} pending
+                        </Badge>
+                        {pendingUsersLoading && <Badge variant="secondary">Loading...</Badge>}
+                    </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                    {pendingUsersLoading ? (
+                        <p className="text-sm text-muted-foreground">Loading pending users...</p>
+                    ) : pendingUsers.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No pending accounts right now.</p>
+                    ) : (
+                        pendingUsers.map((pendingUser) => (
+                            <div key={pendingUser.id} className="p-3 border rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                <div className="space-y-1">
+                                    <p className="font-semibold">{pendingUser.full_name || pendingUser.email}</p>
+                                    <p className="text-xs text-muted-foreground">{pendingUser.email}</p>
+                                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                        <Badge variant="secondary">{pendingUser.role}</Badge>
+                                        {pendingUser.company_name && <span>{pendingUser.company_name}</span>}
+                                        {pendingUser.created_at && <span>Joined {new Date(pendingUser.created_at).toLocaleDateString()}</span>}
+                                    </div>
+                                </div>
+                                <div className="flex gap-2 flex-wrap">
+                                    <Button
+                                        size="sm"
+                                        variant="default"
+                                        disabled={pendingActionUserId === pendingUser.id}
+                                        onClick={() => handleUserApproval(pendingUser.id, 'approved')}
+                                    >
+                                        Approve
+                                    </Button>
+                                    {pendingUser.role === 'client' && (
+                                        <Button
+                                            size="sm"
+                                            variant="secondary"
+                                            disabled={pendingActionUserId === pendingUser.id}
+                                            onClick={async () => {
+                                                setPendingActionUserId(pendingUser.id)
+                                                const res = await forceConfirmEmail(pendingUser.email)
+                                                if (!res.success) {
+                                                    setError(res.error || 'Failed to confirm email')
+                                                } else {
+                                                    setError(null)
+                                                }
+                                                setPendingActionUserId(null)
+                                            }}
+                                        >
+                                            Confirm Email
+                                        </Button>
+                                    )}
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={pendingActionUserId === pendingUser.id}
+                                        onClick={() => handleUserApproval(pendingUser.id, 'rejected')}
+                                    >
+                                        Reject
+                                    </Button>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </CardContent>
+            </Card>
+
+            {/* Pending Project Proposals */}
+            <Card>
+                <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div>
+                        <CardTitle className="text-lg md:text-xl">Project Proposals from Employees</CardTitle>
+                        <CardDescription className="text-xs md:text-sm">Approve or reject tasks that propose new projects</CardDescription>
+                    </div>
+                    {proposalLoading && <Badge variant="outline">Loading...</Badge>}
+                </CardHeader>
+                <CardContent>
+                    {proposals.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No pending proposals right now.</p>
+                    ) : (
+                        <div className="space-y-3">
+                            {proposals.map((proposal) => (
+                                <div key={proposal.id} className="p-3 border rounded-lg space-y-2">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <p className="font-semibold">{proposal.proposed_project_name}</p>
+                                                {proposal.proposed_project_vertical && (
+                                                    <Badge variant="secondary" className="text-xs">
+                                                        {proposal.proposed_project_vertical === 'video_production' && '🎬 Video Production'}
+                                                        {proposal.proposed_project_vertical === 'social_media' && '📱 Social Media'}
+                                                        {proposal.proposed_project_vertical === 'design_branding' && '🎨 Design & Branding'}
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                            <p className="text-sm text-muted-foreground">Task: {proposal.title}</p>
+                                            {proposal.users?.full_name && (
+                                                <p className="text-xs text-muted-foreground">From: {proposal.users.full_name} ({proposal.users.email})</p>
+                                            )}
+                                            <p className="text-xs text-muted-foreground">Created {new Date(proposal.created_at).toLocaleString()}</p>
+                                            {proposal.projects?.name && (
+                                                <p className="text-xs text-muted-foreground">Currently mapped: {proposal.projects.name}</p>
+                                            )}
+                                        </div>
+                                        <div className="w-48">
+                                            <Select
+                                                value={proposalSelections[proposal.id] || 'none'}
+                                                onValueChange={(value) => setProposalSelections({ ...proposalSelections, [proposal.id]: value })}
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Attach to project (optional)" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="none">No project yet</SelectItem>
+                                                    {projects.map((p) => (
+                                                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            size="sm"
+                                            variant="default"
+                                            disabled={proposalSubmitting}
+                                            onClick={() => handleProposalDecision(proposal.id, 'approved')}
+                                        >
+                                            Approve
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={proposalSubmitting}
+                                            onClick={() => handleProposalDecision(proposal.id, 'rejected')}
+                                        >
+                                            Reject
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
 
             {/* Service Breakdown */}
             {projects.length > 0 && (
@@ -487,55 +883,7 @@ export default function AdminDashboard() {
             )
             }
 
-            <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
-                {/* Recent Projects */}
-                <Card>
-                    <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                        <div>
-                            <CardTitle className="text-lg md:text-xl">Recent Projects</CardTitle>
-                            <CardDescription className="text-xs md:text-sm">Latest projects and their status</CardDescription>
-                        </div>
-                        <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/projects')} className="w-full sm:w-auto">
-                            View All
-                        </Button>
-                    </CardHeader>
-                    <CardContent>
-                        {recentProjects.length === 0 ? (
-                            <div className="text-center py-8">
-                                <FolderKanban className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                                <p className="text-sm text-muted-foreground">No projects yet</p>
-                                <Button onClick={() => router.push('/dashboard/projects')} className="mt-4" size="sm">
-                                    <Plus className="h-4 w-4 mr-2" />
-                                    Create Project
-                                </Button>
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {recentProjects.map((project) => (
-                                    <div
-                                        key={project.id}
-                                        className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent cursor-pointer transition-colors"
-                                        onClick={() => setSelectedProject(project)}
-                                    >
-                                        <div className="flex-1">
-                                            <p className="font-medium">{project.name}</p>
-                                            <p className="text-sm text-muted-foreground">
-                                                {project.clients?.company_name || 'No client'}
-                                            </p>
-                                        </div>
-                                        <div className="flex items-center gap-3">
-                                            {project.budget && (
-                                                <span className="text-sm font-medium">₹{project.budget.toLocaleString()}</span>
-                                            )}
-                                            <StatusBadge status={project.status} />
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-
+            <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
                 {/* Recent Clients */}
                 <Card>
                     <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">

@@ -1,4 +1,4 @@
-// Minimal process typing to avoid depending on @types/node for this middleware file
+// Minimal process typing to avoid depending on @types/node for this proxy file
 declare const process: { env: Record<string, string | undefined> }
 
 import { createServerClient } from '@supabase/ssr'
@@ -18,7 +18,7 @@ type SupabaseCookie = {
     }
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
     let supabaseResponse = NextResponse.next({
         request,
     })
@@ -34,34 +34,30 @@ export async function middleware(request: NextRequest) {
     }
 
     if (!supabaseUrl || !supabaseAnon) {
-        console.error('[middleware] Supabase env vars missing')
+        console.error('[proxy] Supabase env vars missing')
         return redirectToLogin('supabase-config')
     }
 
-    const supabase = createServerClient(
-        supabaseUrl,
-        supabaseAnon,
-        {
-            cookies: {
-                getAll: () => request.cookies.getAll(),
-                setAll: (cookiesToSet: SupabaseCookie[]) => {
-                    cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-                    supabaseResponse = NextResponse.next({ request })
-                    cookiesToSet.forEach(({ name, value, options }) =>
-                        supabaseResponse.cookies.set(name, value, options as any)
-                    )
-                },
-            } as any,
-        }
-    )
+    const supabase = createServerClient(supabaseUrl, supabaseAnon, {
+        cookies: {
+            get: (name: string) => request.cookies.get(name)?.value,
+            set: (name: string, value: string, options?: SupabaseCookie['options']) => {
+                supabaseResponse = NextResponse.next({ request })
+                supabaseResponse.cookies.set(name, value, options as any)
+            },
+            remove: (name: string, options?: SupabaseCookie['options']) => {
+                supabaseResponse = NextResponse.next({ request })
+                supabaseResponse.cookies.set(name, '', { ...(options as any), maxAge: 0 })
+            },
+        } as any,
+    })
 
-    let user = null as any
+    let user: any = null
 
     try {
         const { data, error } = await supabase.auth.getUser()
         if (error) {
-            console.error('[middleware] getUser failed', error.message)
-            // Only redirect to login if trying to access protected routes; allow public pages
+            console.error('[proxy] getUser failed', error.message)
             if (request.nextUrl.pathname.startsWith('/dashboard')) {
                 return redirectToLogin('auth')
             }
@@ -69,8 +65,7 @@ export async function middleware(request: NextRequest) {
             user = data.user
         }
     } catch (err: any) {
-        console.error('[middleware] Unexpected getUser error', err?.message)
-        // Only redirect if accessing protected routes
+        console.error('[proxy] Unexpected getUser error', err?.message)
         if (request.nextUrl.pathname.startsWith('/dashboard')) {
             return redirectToLogin('auth')
         }
@@ -82,7 +77,6 @@ export async function middleware(request: NextRequest) {
             return NextResponse.redirect(new URL('/login', request.url))
         }
 
-        // Fetch user role to enforce access
         try {
             const { data: userData, error: roleError } = await supabase
                 .from('users')
@@ -91,7 +85,7 @@ export async function middleware(request: NextRequest) {
                 .single()
 
             if (roleError) {
-                console.error('[middleware] Role fetch failed', roleError.message)
+                console.error('[proxy] Role fetch failed', roleError.message)
                 return redirectToLogin('role')
             }
 
@@ -99,41 +93,41 @@ export async function middleware(request: NextRequest) {
                 const role = userData.role
                 const path = request.nextUrl.pathname
 
-                // Redirect clients trying to access admin/employee routes
                 if (role === 'client' && !path.startsWith('/dashboard/client')) {
                     return NextResponse.redirect(new URL('/dashboard/client', request.url))
                 }
 
-                // Redirect employees trying to access admin/client routes
                 if (role === 'project_manager' && !path.startsWith('/dashboard/employee')) {
                     return NextResponse.redirect(new URL('/dashboard/employee', request.url))
                 }
 
-                // Redirect admin trying to access client/employee specific routes
-                if (role === 'admin' && (path.startsWith('/dashboard/client/') || path.startsWith('/dashboard/employee/'))) {
+                if (
+                    role === 'admin' &&
+                    (path.startsWith('/dashboard/client/') || path.startsWith('/dashboard/employee/'))
+                ) {
                     return NextResponse.redirect(new URL('/dashboard', request.url))
                 }
 
-                // Redirect /dashboard to correct role-specific dashboard
                 if (path === '/dashboard') {
                     if (role === 'client') {
                         return NextResponse.redirect(new URL('/dashboard/client', request.url))
                     } else if (role === 'project_manager') {
                         return NextResponse.redirect(new URL('/dashboard/employee', request.url))
                     }
-                    // Admin stays at /dashboard
                 }
             }
         } catch (err: any) {
-            console.error('[middleware] Unexpected role guard error', err?.message)
+            console.error('[proxy] Unexpected role guard error', err?.message)
             return redirectToLogin('role')
         }
     }
 
-    // Do NOT auto-redirect away from auth pages.
-    // Let the login/signup pages render even if a session exists
-    // so users can switch accounts intentionally.
-    if (request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/signup' || request.nextUrl.pathname === '/auth/select-role') {
+    // Allow auth pages to render unchanged
+    if (
+        request.nextUrl.pathname === '/login' ||
+        request.nextUrl.pathname === '/signup' ||
+        request.nextUrl.pathname === '/auth/select-role'
+    ) {
         return supabaseResponse
     }
 
@@ -142,14 +136,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
     matcher: [
-        /*
-         * Match all request paths except:
-         * - _next/static (static files)
-         * - _next/image (image optimization files)
-         * - _next/data (server actions and data fetching)
-         * - favicon.ico, sitemap.xml, robots.txt (metadata files)
-         * - images and other static assets
-         */
         '/((?!_next/static|_next/image|_next/data|favicon.ico|sitemap.xml|robots.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 }

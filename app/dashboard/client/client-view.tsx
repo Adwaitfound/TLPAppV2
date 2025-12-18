@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { StatCard } from "@/components/shared/stat-card"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { FolderKanban, Download, FileText, Plus, Eye } from "lucide-react"
+import { FolderKanban, Download, FileText, Plus, Eye, Filter, CalendarClock } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { createClient } from "@/lib/supabase/client"
 import { useAuth } from "@/contexts/auth-context"
@@ -18,12 +19,34 @@ export default function ClientDashboard() {
     const [files, setFiles] = useState<any[]>([])
     const [clientData, setClientData] = useState<any>(null)
     const [loading, setLoading] = useState(true)
+    const [statusFilter, setStatusFilter] = useState<string>('all')
+    const [invoiceFilter, setInvoiceFilter] = useState<string>('all')
     const [stats, setStats] = useState({
         activeProjects: 0,
         completedProjects: 0,
         pendingInvoices: 0,
         totalSpent: 0,
     })
+
+    const filteredProjects = useMemo(() => {
+        if (statusFilter === 'all') return projects
+        return projects.filter((p) => p.status === statusFilter)
+    }, [projects, statusFilter])
+
+    const filteredInvoices = useMemo(() => {
+        if (invoiceFilter === 'all') return invoices
+        return invoices.filter((inv) => inv.status === invoiceFilter)
+    }, [invoices, invoiceFilter])
+
+    const nextDueInvoice = useMemo(() => {
+        return [...invoices]
+            .filter((inv) => inv.status !== 'paid' && inv.due_date)
+            .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())[0]
+    }, [invoices])
+
+    const lastDelivery = useMemo(() => {
+        return [...files].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+    }, [files])
 
     useEffect(() => {
         async function fetchClientData() {
@@ -134,6 +157,20 @@ export default function ClientDashboard() {
             trend: "up" as const,
             icon: Download,
         },
+        {
+            title: "Next Due Invoice",
+            value: nextDueInvoice ? `₹${(nextDueInvoice.total || 0).toLocaleString()}` : 'None',
+            change: nextDueInvoice ? `Due ${new Date(nextDueInvoice.due_date).toLocaleDateString()}` : 'All paid',
+            trend: nextDueInvoice ? 'down' as const : 'up' as const,
+            icon: CalendarClock,
+        },
+        {
+            title: "Last Delivery",
+            value: lastDelivery ? (lastDelivery.file_name || 'File') : 'No files',
+            change: lastDelivery ? `From ${lastDelivery.projects?.name || 'Project'}` : 'Waiting for first upload',
+            trend: lastDelivery ? 'up' as const : 'neutral' as const,
+            icon: Download,
+        },
     ]
 
     return (
@@ -141,17 +178,19 @@ export default function ClientDashboard() {
             {/* Header */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">
-                        Welcome, {clientData?.company_name}
-                    </h1>
-                    <p className="text-muted-foreground">
-                        Track your projects and download deliverables
-                    </p>
+                    <h1 className="text-3xl font-bold tracking-tight">Welcome, {clientData?.company_name}</h1>
+                    <p className="text-muted-foreground">Track your projects and download deliverables</p>
                 </div>
-                <Button onClick={() => router.push('/dashboard/client/request')}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Request Project
-                </Button>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <Button variant="outline" size="sm" onClick={() => setStatusFilter(statusFilter === 'all' ? 'in_progress' : 'all')}>
+                        <Filter className="h-4 w-4 mr-2" />
+                        {statusFilter === 'all' ? 'Show Active' : 'Show All'}
+                    </Button>
+                    <Button onClick={() => router.push('/dashboard/client/request')}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Request Project
+                    </Button>
+                </div>
             </div>
 
             {/* Stats Grid */}
@@ -172,16 +211,14 @@ export default function ClientDashboard() {
                         </div>
                     </CardHeader>
                     <CardContent>
-                        {projects.length === 0 ? (
+                        {filteredProjects.length === 0 ? (
                             <div className="text-center py-8">
-                                <p className="text-sm text-muted-foreground mb-4">No projects yet</p>
-                                <Button onClick={() => router.push('/dashboard/client/request')}>
-                                    Request Your First Project
-                                </Button>
+                                <p className="text-sm text-muted-foreground mb-4">No projects match this filter</p>
+                                <Button variant="outline" onClick={() => setStatusFilter('all')}>Reset Filter</Button>
                             </div>
                         ) : (
                             <div className="space-y-4">
-                                {projects.slice(0, 3).map((project) => (
+                                {filteredProjects.slice(0, 3).map((project) => (
                                     <div key={project.id} className="p-4 rounded-lg border hover:bg-accent cursor-pointer transition-colors"
                                         onClick={() => router.push(`/dashboard/client/projects/${project.id}`)}>
                                         <div className="flex items-start justify-between mb-3">
@@ -245,9 +282,9 @@ export default function ClientDashboard() {
                                             </div>
                                         </div>
                                         <Button size="sm" variant="ghost" onClick={() => {
-                                            window.open(file.file_url, '_blank')
+                                            router.push(`/dashboard/client/projects/${file.project_id}`)
                                         }}>
-                                            <Download className="h-4 w-4" />
+                                            <Eye className="h-4 w-4" />
                                         </Button>
                                     </div>
                                 ))}
@@ -269,11 +306,22 @@ export default function ClientDashboard() {
                     </Button>
                 </CardHeader>
                 <CardContent>
-                    {invoices.length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-8">No invoices yet</p>
+                    <div className="flex items-center gap-2 mb-3">
+                        <Select value={invoiceFilter} onValueChange={setInvoiceFilter}>
+                            <SelectTrigger className="w-[170px]"><SelectValue placeholder="All invoices" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All</SelectItem>
+                                <SelectItem value="paid">Paid</SelectItem>
+                                <SelectItem value="sent">Sent</SelectItem>
+                                <SelectItem value="overdue">Overdue</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    {filteredInvoices.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">No invoices match this filter</p>
                     ) : (
                         <div className="space-y-3">
-                            {invoices.slice(0, 5).map((invoice) => (
+                            {filteredInvoices.slice(0, 5).map((invoice) => (
                                 <div key={invoice.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent cursor-pointer transition-colors"
                                     onClick={() => router.push(`/dashboard/client/invoices/${invoice.id}`)}>
                                     <div className="flex items-center gap-4 flex-1">
@@ -288,14 +336,22 @@ export default function ClientDashboard() {
                                             <StatusBadge status={invoice.status} />
                                         </div>
                                     </div>
-                                    {invoice.status !== 'paid' && (
-                                        <Button size="sm" className="ml-3" onClick={(e) => {
+                                    <div className="flex items-center gap-2 ml-3">
+                                        <Button size="sm" variant="outline" onClick={(e) => {
                                             e.stopPropagation()
-                                            router.push(`/dashboard/client/invoices/${invoice.id}/pay`)
+                                            if (invoice.invoice_url) window.open(invoice.invoice_url, '_blank')
                                         }}>
-                                            Pay Now
+                                            <Download className="h-4 w-4 mr-1" /> PDF
                                         </Button>
-                                    )}
+                                        {invoice.status !== 'paid' && (
+                                            <Button size="sm" onClick={(e) => {
+                                                e.stopPropagation()
+                                                router.push(`/dashboard/client/invoices/${invoice.id}/pay`)
+                                            }}>
+                                                Pay Now
+                                            </Button>
+                                        )}
+                                    </div>
                                 </div>
                             ))}
                         </div>

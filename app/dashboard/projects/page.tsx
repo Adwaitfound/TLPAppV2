@@ -144,13 +144,67 @@ function ProjectsPageContent() {
     setLoading(true)
 
     try {
-      // Fetch projects with client data
-      const { data: projectsData, error: projectsError } = await supabase
-        .from('projects')
-        .select('*, clients(company_name, contact_person)')
-        .order('created_at', { ascending: false })
+      let projectsData: Project[] = []
 
-      if (projectsError) throw projectsError
+      console.log('[ProjectsPage] 🔵 FETCH START - User:', user?.id, 'Email:', user?.email, 'Role:', user?.role)
+
+      // Filter projects based on user role
+      if (user?.role === 'project_manager' || user?.role === 'employee') {
+        console.log('[ProjectsPage] 🔷 Employee/PM fetch mode')
+
+        // For employees: fetch projects they created OR are team members of
+        console.log('[ProjectsPage] Fetching projects created by:', user.id)
+        const { data: createdProjects, error: createdError } = await supabase
+          .from('projects')
+          .select('*, clients(company_name, contact_person)')
+          .eq('created_by', user.id)
+          .order('created_at', { ascending: false })
+
+        console.log('[ProjectsPage] Created projects result:', { count: createdProjects?.length, error: createdError })
+        if (createdError) throw createdError
+
+        // Fetch projects where user is a team member
+        console.log('[ProjectsPage] Fetching project_team entries for user:', user.id)
+        const { data: teamProjects, error: teamError } = await supabase
+          .from('project_team')
+          .select('projects(*, clients(company_name, contact_person))')
+          .eq('user_id', user.id)
+
+        console.log('[ProjectsPage] Team projects result:', { count: teamProjects?.length, error: teamError })
+        if (teamError) {
+          console.warn('[ProjectsPage] ⚠️ Team projects query failed:', teamError)
+        }
+
+        // Combine and deduplicate projects
+        const allProjects = [...(createdProjects || [])]
+        const teamProjectsData = (teamProjects || []).map((tp: any) => tp.projects).filter(Boolean)
+
+        console.log('[ProjectsPage] Before dedup - created:', allProjects.length, 'from team:', teamProjectsData.length)
+
+        teamProjectsData.forEach((tp: any) => {
+          if (!allProjects.find(p => p.id === tp.id)) {
+            allProjects.push(tp)
+          }
+        })
+
+        console.log('[ProjectsPage] After dedup - total projects:', allProjects.length)
+        allProjects.forEach(p => console.log('[ProjectsPage] Project:', p.id, p.name))
+
+        projectsData = allProjects
+      } else {
+        // For admin: fetch all projects
+        console.log('[ProjectsPage] 🔷 Admin fetch mode - fetching ALL projects')
+        const { data: allProjects, error: projectsError } = await supabase
+          .from('projects')
+          .select('*, clients(company_name, contact_person)')
+          .order('created_at', { ascending: false })
+
+        console.log('[ProjectsPage] All projects result:', { count: allProjects?.length, error: projectsError })
+        if (projectsError) throw projectsError
+        projectsData = allProjects || []
+      }
+
+      console.log('[ProjectsPage] ✅ Total projects to display:', projectsData.length)
       debug.success('FETCH_DATA', 'Projects fetched', { count: projectsData?.length })
 
       // Fetch clients for dropdown
@@ -268,9 +322,9 @@ function ProjectsPageContent() {
         if (usersError) {
           console.error('Error fetching users:', usersError)
         } else {
-          // Filter to only show admin and project_manager roles
+          // Show all internal roles when assigning projects (admins, PMs, employees)
           const filteredUsers = (allUsers || []).filter(u =>
-            u.role === 'admin' || u.role === 'project_manager'
+            u.role === 'admin' || u.role === 'project_manager' || u.role === 'employee'
           )
           setAvailableUsers(filteredUsers)
         }
@@ -562,13 +616,15 @@ function ProjectsPageContent() {
         throw new Error('Task name is required')
       }
 
+      const assignedUserId = subProjectFormData.assigned_to === "unassigned" ? null : subProjectFormData.assigned_to
+
       const { error } = await supabase
         .from('sub_projects')
         .insert({
           parent_project_id: selectedProject.id,
           name: subProjectFormData.name,
           description: subProjectFormData.description,
-          assigned_to: subProjectFormData.assigned_to === "unassigned" ? null : subProjectFormData.assigned_to,
+          assigned_to: assignedUserId,
           due_date: subProjectFormData.due_date || null,
           status: subProjectFormData.status,
           video_url: subProjectFormData.video_url || null,
@@ -576,6 +632,25 @@ function ProjectsPageContent() {
         })
 
       if (error) throw error
+
+      // If assigned to an employee, also create an employee_tasks entry
+      if (assignedUserId) {
+        const { error: taskError } = await supabase
+          .from('employee_tasks')
+          .insert({
+            user_id: assignedUserId,
+            project_id: selectedProject.id,
+            title: subProjectFormData.name,
+            description: subProjectFormData.description,
+            due_date: subProjectFormData.due_date || null,
+            status: 'todo'
+          })
+
+        if (taskError) {
+          console.warn('Warning: Task created in sub_projects but failed to create employee task:', taskError)
+          // Don't fail the whole operation if employee_tasks insert fails
+        }
+      }
 
       // Reset form first BEFORE closing dialog to ensure state is clean
       setSubProjectFormData({ name: "", description: "", assigned_to: "unassigned", due_date: "", status: "planning", video_url: "" })
@@ -603,12 +678,14 @@ function ProjectsPageContent() {
     const supabase = createClient()
 
     try {
+      const assignedUserId = editSubProjectFormData.assigned_to === "unassigned" ? null : editSubProjectFormData.assigned_to
+
       const { error } = await supabase
         .from('sub_projects')
         .update({
           name: editSubProjectFormData.name,
           description: editSubProjectFormData.description,
-          assigned_to: editSubProjectFormData.assigned_to === "unassigned" ? null : editSubProjectFormData.assigned_to,
+          assigned_to: assignedUserId,
           due_date: editSubProjectFormData.due_date || null,
           status: editSubProjectFormData.status,
           video_url: editSubProjectFormData.video_url || null,
@@ -616,6 +693,32 @@ function ProjectsPageContent() {
         .eq('id', selectedSubProject.id)
 
       if (error) throw error
+
+      // Update employee_tasks if assignment changed
+      if (assignedUserId) {
+        // Check if there's already an employee task for this sub-project
+        const { data: existingTask } = await supabase
+          .from('employee_tasks')
+          .select('id')
+          .eq('user_id', assignedUserId)
+          .eq('project_id', selectedProject?.id)
+          .match({ title: editSubProjectFormData.name })
+          .single()
+
+        if (!existingTask) {
+          // Create new employee task
+          await supabase
+            .from('employee_tasks')
+            .insert({
+              user_id: assignedUserId,
+              project_id: selectedProject?.id,
+              title: editSubProjectFormData.name,
+              description: editSubProjectFormData.description,
+              due_date: editSubProjectFormData.due_date || null,
+              status: 'todo'
+            })
+        }
+      }
 
       setIsEditSubProjectDialogOpen(false)
       setSelectedSubProject(null)
@@ -1178,167 +1281,173 @@ function ProjectsPageContent() {
     <div className="flex flex-col gap-4 md:gap-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Projects</h1>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
+            {user?.role === 'project_manager' || user?.role === 'employee' ? 'My Projects' : 'Projects'}
+          </h1>
           <p className="text-sm md:text-base text-muted-foreground">
-            Manage all your video production projects
+            {user?.role === 'project_manager' || user?.role === 'employee'
+              ? 'All your assigned projects and collaborations'
+              : 'Manage all your video production projects'}
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="w-full md:w-auto">
-              <Plus className="mr-2 h-4 w-4" />
-              New Project
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-md md:max-w-2xl max-h-[90vh] overflow-y-auto">
-            <form onSubmit={handleSubmit}>
-              <DialogHeader>
-                <DialogTitle>Create New Project</DialogTitle>
-                <DialogDescription>
-                  Enter the project details to get started.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="name">Project Name *</Label>
-                  <Input
-                    id="name"
-                    placeholder="Brand Video Production"
-                    required
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="client">Client *</Label>
-                  <Select
-                    value={formData.client_id}
-                    onValueChange={(value) => setFormData({ ...formData, client_id: value })}
-                    required
-                  >
-                    <SelectTrigger id="client">
-                      <SelectValue placeholder="Select a client" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {clients.length === 0 ? (
-                        <SelectItem value="none" disabled>No clients available</SelectItem>
-                      ) : (
-                        clients.map((client) => (
-                          <SelectItem key={client.id} value={client.id}>
-                            {client.company_name}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                  {clients.length === 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      Add a client first before creating a project
-                    </p>
-                  )}
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="service">Service Type *</Label>
-                  <Select
-                    value={formData.service_type}
-                    onValueChange={(value) => setFormData({ ...formData, service_type: value as ServiceType })}
-                    required
-                  >
-                    <SelectTrigger id="service">
-                      <SelectValue placeholder="Select service type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.values(SERVICE_TYPES).map((service) => (
-                        <SelectItem key={service.value} value={service.value}>
-                          <span className="flex items-center gap-2">
-                            <span>{service.icon}</span>
-                            <span>{service.label}</span>
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {SERVICE_TYPES[formData.service_type].description}
-                  </p>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="description">Description</Label>
-                  <Textarea
-                    id="description"
-                    placeholder="Brief project description"
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {(user?.role === 'admin') && (
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="w-full md:w-auto">
+                <Plus className="mr-2 h-4 w-4" />
+                New Project
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md md:max-w-2xl max-h-[90vh] overflow-y-auto">
+              <form onSubmit={handleSubmit}>
+                <DialogHeader>
+                  <DialogTitle>Create New Project</DialogTitle>
+                  <DialogDescription>
+                    Enter the project details to get started.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
                   <div className="grid gap-2">
-                    <Label htmlFor="budget">Budget (₹)</Label>
+                    <Label htmlFor="name">Project Name *</Label>
                     <Input
-                      id="budget"
-                      type="number"
-                      placeholder="10000"
-                      value={formData.budget}
-                      onChange={(e) => setFormData({ ...formData, budget: e.target.value })}
+                      id="name"
+                      placeholder="Brand Video Production"
+                      required
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="status">Status</Label>
+                    <Label htmlFor="client">Client *</Label>
                     <Select
-                      value={formData.status}
-                      onValueChange={(value: ProjectStatus) => setFormData({ ...formData, status: value })}
+                      value={formData.client_id}
+                      onValueChange={(value) => setFormData({ ...formData, client_id: value })}
+                      required
                     >
-                      <SelectTrigger id="status">
-                        <SelectValue />
+                      <SelectTrigger id="client">
+                        <SelectValue placeholder="Select a client" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="planning">Planning</SelectItem>
-                        <SelectItem value="in_progress">In Progress</SelectItem>
-                        <SelectItem value="in_review">In Review</SelectItem>
-                        <SelectItem value="completed">Completed</SelectItem>
-                        <SelectItem value="stuck">Stuck</SelectItem>
+                        {clients.length === 0 ? (
+                          <SelectItem value="none" disabled>No clients available</SelectItem>
+                        ) : (
+                          clients.map((client) => (
+                            <SelectItem key={client.id} value={client.id}>
+                              {client.company_name}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="start_date">Start Date</Label>
-                    <Input
-                      id="start_date"
-                      type="date"
-                      value={formData.start_date}
-                      onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                    />
+                    {clients.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Add a client first before creating a project
+                      </p>
+                    )}
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="deadline">Deadline</Label>
-                    <Input
-                      id="deadline"
-                      type="date"
-                      value={formData.deadline}
-                      onChange={(e) => setFormData({ ...formData, deadline: e.target.value })}
+                    <Label htmlFor="service">Service Type *</Label>
+                    <Select
+                      value={formData.service_type}
+                      onValueChange={(value) => setFormData({ ...formData, service_type: value as ServiceType })}
+                      required
+                    >
+                      <SelectTrigger id="service">
+                        <SelectValue placeholder="Select service type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.values(SERVICE_TYPES).map((service) => (
+                          <SelectItem key={service.value} value={service.value}>
+                            <span className="flex items-center gap-2">
+                              <span>{service.icon}</span>
+                              <span>{service.label}</span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {SERVICE_TYPES[formData.service_type].description}
+                    </p>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="description">Description</Label>
+                    <Textarea
+                      id="description"
+                      placeholder="Brief project description"
+                      value={formData.description}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     />
                   </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="budget">Budget (₹)</Label>
+                      <Input
+                        id="budget"
+                        type="number"
+                        placeholder="10000"
+                        value={formData.budget}
+                        onChange={(e) => setFormData({ ...formData, budget: e.target.value })}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="status">Status</Label>
+                      <Select
+                        value={formData.status}
+                        onValueChange={(value: ProjectStatus) => setFormData({ ...formData, status: value })}
+                      >
+                        <SelectTrigger id="status">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="planning">Planning</SelectItem>
+                          <SelectItem value="in_progress">In Progress</SelectItem>
+                          <SelectItem value="in_review">In Review</SelectItem>
+                          <SelectItem value="completed">Completed</SelectItem>
+                          <SelectItem value="stuck">Stuck</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="start_date">Start Date</Label>
+                      <Input
+                        id="start_date"
+                        type="date"
+                        value={formData.start_date}
+                        onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="deadline">Deadline</Label>
+                      <Input
+                        id="deadline"
+                        type="date"
+                        value={formData.deadline}
+                        onChange={(e) => setFormData({ ...formData, deadline: e.target.value })}
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsDialogOpen(false)}
-                  disabled={submitting}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={submitting || clients.length === 0}>
-                  {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {submitting ? 'Creating...' : 'Create Project'}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsDialogOpen(false)}
+                    disabled={submitting}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={submitting || clients.length === 0}>
+                    {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {submitting ? 'Creating...' : 'Create Project'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
 
       {/* Project Stats */}

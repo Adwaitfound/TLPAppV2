@@ -2,27 +2,31 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 
-// Server-side Supabase client (cookie-aware). Must be synchronous so callers don't forget to await.
-export function createClient() {
-  const cookieStore = cookies()
+// Server-side Supabase client (cookie-aware). Async to support Next 16 cookies() Promise API.
+export async function createClient() {
+  const cookieStore = await (cookies() as any)
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return cookieStore.getAll()
+        get(name: string) {
+          const cookie = cookieStore?.get?.(name)
+          return (cookie?.value ?? undefined) as string | undefined
         },
-        setAll(cookiesToSet) {
+        set(name: string, value: string, options?: any) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            )
+            cookieStore?.set?.(name, value, options)
           } catch {
-            // The `setAll` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
+            // Ignore if called in a Server Component without mutable cookies
+          }
+        },
+        remove(name: string, options?: any) {
+          try {
+            cookieStore?.set?.(name, '', { ...(options || {}), maxAge: 0 })
+          } catch {
+            // Ignore if called in a Server Component without mutable cookies
           }
         },
       },

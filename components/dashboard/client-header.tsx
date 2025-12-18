@@ -77,7 +77,7 @@ export function ClientHeader() {
                 <DropdownMenuTrigger asChild>
                     <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                         <Avatar className="h-8 w-8">
-                            <AvatarImage src="/avatar.png" alt="User" />
+                            <AvatarImage src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP8/5+hHgAGgwJ/lqS4VwAAAABJRU5ErkJggg==" alt="User" />
                             <AvatarFallback>CL</AvatarFallback>
                         </Avatar>
                     </Button>

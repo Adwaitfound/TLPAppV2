@@ -56,7 +56,7 @@ export default function TeamPage() {
     const [memberFormData, setMemberFormData] = useState({
         email: "",
         full_name: "",
-        role: "project_manager" as "admin" | "project_manager",
+        role: "project_manager" as "admin" | "project_manager" | "employee",
         password: "",
     })
 
@@ -76,7 +76,7 @@ export default function TeamPage() {
             const { data: usersData, error: usersError } = await supabase
                 .from('users')
                 .select('*')
-                .in('role', ['admin', 'project_manager'])
+                .in('role', ['admin', 'project_manager', 'employee'])
                 .order('full_name')
 
             if (usersError) {
@@ -382,6 +382,7 @@ export default function TeamPage() {
                         <SelectItem value="all">All Roles</SelectItem>
                         <SelectItem value="admin">Admins</SelectItem>
                         <SelectItem value="project_manager">Project Managers</SelectItem>
+                        <SelectItem value="employee">Employees</SelectItem>
                     </SelectContent>
                 </Select>
             </div>
@@ -584,7 +585,7 @@ export default function TeamPage() {
                                 <Label htmlFor="member-role">Role *</Label>
                                 <Select
                                     value={memberFormData.role}
-                                    onValueChange={(value: "admin" | "project_manager") => setMemberFormData({ ...memberFormData, role: value })}
+                                    onValueChange={(value: "admin" | "project_manager" | "employee") => setMemberFormData({ ...memberFormData, role: value })}
                                     required
                                 >
                                     <SelectTrigger id="member-role">
@@ -593,6 +594,7 @@ export default function TeamPage() {
                                     <SelectContent>
                                         <SelectItem value="project_manager">Project Manager</SelectItem>
                                         <SelectItem value="admin">Admin</SelectItem>
+                                        <SelectItem value="employee">Employee</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>

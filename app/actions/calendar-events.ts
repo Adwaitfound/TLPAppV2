@@ -17,7 +17,7 @@ export type CalendarEventInput = {
 }
 
 export async function createCalendarEvent(input: CalendarEventInput) {
-    const supabase = createClient()
+    const supabase = await createClient()
     const { data, error } = await supabase.from("calendar_events").insert({
         project_id: input.project_id,
         event_date: input.event_date,
@@ -36,7 +36,7 @@ export async function createCalendarEvent(input: CalendarEventInput) {
 }
 
 export async function updateCalendarEvent(id: string, patch: Partial<CalendarEventInput>) {
-    const supabase = createClient()
+    const supabase = await createClient()
     const { data, error } = await supabase.from("calendar_events").update({
         ...(patch.title !== undefined && { title: patch.title }),
         ...(patch.copy !== undefined && { copy: patch.copy }),
@@ -53,14 +53,14 @@ export async function updateCalendarEvent(id: string, patch: Partial<CalendarEve
 }
 
 export async function deleteCalendarEvent(id: string) {
-    const supabase = createClient()
+    const supabase = await createClient()
     const { error } = await supabase.from("calendar_events").delete().eq("id", id)
     if (error) throw new Error(error.message)
     revalidatePath("/dashboard/projects")
 }
 
 export async function listCalendarEvents(projectId: string, monthISO: string) {
-    const supabase = createClient()
+    const supabase = await createClient()
     const start = new Date(monthISO)
     const startISO = new Date(start.getFullYear(), start.getMonth(), 1).toISOString().slice(0, 10)
     const endISO = new Date(start.getFullYear(), start.getMonth() + 1, 0).toISOString().slice(0, 10)

@@ -10,7 +10,9 @@ import {
   FileText,
   BarChart3,
   Settings,
-  UserCheck
+  UserCheck,
+  MessageSquare,
+  Bell
 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 
@@ -24,6 +26,16 @@ const adminRoutes = [
     label: "Projects",
     icon: FolderKanban,
     href: "/dashboard/projects",
+  },
+  {
+    label: "Comments",
+    icon: MessageSquare,
+    href: "/dashboard/comments",
+  },
+  {
+    label: "Notifications",
+    icon: Bell,
+    href: "/dashboard/notifications",
   },
   {
     label: "All Clients",
@@ -64,6 +76,16 @@ const employeeRoutes = [
     href: "/dashboard/projects",
   },
   {
+    label: "Comments",
+    icon: MessageSquare,
+    href: "/dashboard/comments",
+  },
+  {
+    label: "Notifications",
+    icon: Bell,
+    href: "/dashboard/notifications",
+  },
+  {
     label: "Settings",
     icon: Settings,
     href: "/dashboard/settings",
@@ -80,6 +102,11 @@ const clientRoutes = [
     label: "My Projects",
     icon: FolderKanban,
     href: "/dashboard/client/projects",
+  },
+  {
+    label: "Notifications",
+    icon: Bell,
+    href: "/dashboard/notifications",
   },
   {
     label: "Settings",
@@ -103,17 +130,17 @@ export function Sidebar() {
   return (
     <div className="flex h-full flex-col gap-2">
       <div className="flex h-14 items-center border-b px-4 lg:h-[60px] lg:px-6">
-        <Link href="/dashboard" className="flex items-center gap-2 font-semibold">
+        <div className="flex items-center gap-2">
           <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-lg">VP</span>
+            <span className="text-primary-foreground font-bold text-lg">TLP</span>
           </div>
           <div className="flex flex-col">
-            <span className="text-xs text-muted-foreground">Welcome</span>
-            <span className="text-lg font-bold leading-tight line-clamp-2">
-              {user?.company_name || user?.full_name || "Video Production"}
+            <span className="text-lg font-bold leading-tight">The Lost Project</span>
+            <span className="text-xs text-muted-foreground">
+              {user?.role === 'admin' ? 'Admin Panel' : user?.role === 'project_manager' ? 'Employee Portal' : 'Client Portal'}
             </span>
           </div>
-        </Link>
+        </div>
       </div>
       <div className="flex-1">
         <nav className="grid items-start px-2 text-sm font-medium lg:px-4">

@@ -30,6 +30,7 @@ import type { ProjectFile, FileCategory } from "@/types"
 import { FILE_CATEGORIES, validateFileSize, formatFileSize, getFileType } from "@/lib/file-upload"
 import { useAuth } from "@/contexts/auth-context"
 import { getSignedProjectFileUrl } from "@/app/actions/project-file-operations"
+import { logAuditEvent } from "@/app/actions/audit-log"
 
 interface FileManagerProps {
     projectId: string
@@ -51,10 +52,12 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
     const [isPreviewOpen, setIsPreviewOpen] = useState(false)
     const [previewFile, setPreviewFile] = useState<ProjectFile | null>(null)
 
-    // Refs to prevent race conditions
+    // Refs to prevent race conditions and state corruption
     const isSubmittingRef = useRef(false)
     const isUploadingRef = useRef(false)
     const isSavingDriveRef = useRef(false)
+    const abortControllerRef = useRef<AbortController | null>(null)
+    const componentMountedRef = useRef(true)
 
     // Upload form state
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -67,8 +70,20 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
     const [linkCategory, setLinkCategory] = useState<FileCategory>("other")
     const [linkDescription, setLinkDescription] = useState("")
 
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            componentMountedRef.current = false
+            // Cancel any pending requests
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort()
+            }
+        }
+    }, [])
+
     // Fetch files on mount and when project changes
     useEffect(() => {
+        if (!projectId || !componentMountedRef.current) return
         fetchFiles()
     }, [projectId])
 
@@ -93,6 +108,7 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
 
     useEffect(() => {
         if (!isLinkDialogOpen) {
+            console.log('[FileManager] Link dialog closed - resetting form')
             setLinkUrl("")
             setLinkName("")
             setLinkDescription("")
@@ -100,6 +116,8 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
             setLinkSubmitting(false)
             isSubmittingRef.current = false
             debug.log('FILE_MANAGER', 'Add link dialog closed and form reset')
+        } else {
+            console.log('[FileManager] Link dialog opened')
         }
     }, [isLinkDialogOpen])
 
@@ -112,6 +130,9 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
     }, [isDriveFolderDialogOpen, driveFolderUrl])
 
     async function fetchFiles() {
+        // Guard: already loading or component unmounted
+        if (loading || !componentMountedRef.current || !projectId) return
+
         setLoading(true)
         const supabase = createClient()
 
@@ -124,8 +145,12 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                 .order('created_at', { ascending: false })
 
             if (error) throw error
-            setFiles(data || [])
-            debug.success('FILE_MANAGER', 'Files fetched', { count: data?.length })
+
+            // Only update state if component still mounted
+            if (componentMountedRef.current) {
+                setFiles(data || [])
+                debug.success('FILE_MANAGER', 'Files fetched', { count: data?.length })
+            }
         } catch (error) {
             console.error('Error fetching files:', error)
             debug.error('FILE_MANAGER', 'Error fetching files', {
@@ -133,7 +158,9 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                 code: (error as any)?.code,
             })
         } finally {
-            setLoading(false)
+            if (componentMountedRef.current) {
+                setLoading(false)
+            }
         }
     }
 
@@ -206,6 +233,25 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                 setFiles(prev => [fileData, ...prev])
             }
 
+            // Log the file upload
+            logAuditEvent({
+                action: 'upload',
+                entityType: 'file',
+                entityId: fileData?.id,
+                entityName: selectedFile.name,
+                status: 'success',
+                newValues: {
+                    file_name: selectedFile.name,
+                    file_type: getFileType(selectedFile.name),
+                    file_category: uploadCategory,
+                    file_size: selectedFile.size,
+                },
+                details: {
+                    project_id: projectId,
+                    description: uploadDescription,
+                },
+            }).catch(e => console.warn('Failed to log audit event:', e))
+
             // Close dialog first
             setIsUploadDialogOpen(false)
 
@@ -218,6 +264,20 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
             debug.success('FILE_MANAGER', 'Upload saved, added to list, dialog closed')
         } catch (error: any) {
             console.error('Error uploading file:', error)
+
+            // Log the failure
+            logAuditEvent({
+                action: 'upload',
+                entityType: 'file',
+                entityName: selectedFile.name,
+                status: 'error',
+                errorMessage: error?.message,
+                details: {
+                    project_id: projectId,
+                    file_size: selectedFile.size,
+                },
+            }).catch(e => console.warn('Failed to log audit event:', e))
+
             debug.error('FILE_MANAGER', 'Upload error', {
                 message: error?.message,
                 code: error?.code,
@@ -233,91 +293,105 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
     }
 
     async function handleAddLink() {
-        // Prevent overlapping submissions using ref (survives re-renders)
-        if (isSubmittingRef.current) {
-            debug.log('FILE_MANAGER', 'Submission already in progress, ignoring')
+        // ========== GUARDS: Block execution if already in progress ==========
+        if (!componentMountedRef.current) return
+        if (isSubmittingRef.current || linkSubmitting) {
+            console.log('[handleAddLink] BLOCKED: already submitting')
             return
         }
 
-        if (!linkUrl.trim() || !linkName.trim()) {
+        // ========== VALIDATION ==========
+        const trimmedUrl = linkUrl.trim()
+        const trimmedName = linkName.trim()
+
+        if (!trimmedUrl || !trimmedName) {
             alert('Please provide both URL and file name')
             return
         }
 
-        // Check file limit
         if (files.length >= 20) {
             alert('Maximum 20 files/links per project. Please delete some files before adding more.')
             return
         }
 
-        // Mark as submitting using ref (not affected by re-renders)
+        // ========== SET GUARDS ==========
         isSubmittingRef.current = true
         setLinkSubmitting(true)
 
         const supabase = createClient()
 
         try {
-            debug.log('FILE_MANAGER', 'Add link start', {
-                projectId,
-                name: linkName,
-                url: linkUrl,
-                category: linkCategory,
-                currentFileCount: files.length,
-            })
+            console.log('[handleAddLink] ✅ Starting submission')
 
+            // Validate input one more time before submitting
+            if (!projectId || !user?.id) {
+                throw new Error('Missing projectId or userId')
+            }
+
+            // ========== INSERT TO DATABASE ==========
             const { data, error } = await supabase
                 .from('project_files')
                 .insert({
                     project_id: projectId,
-                    file_name: linkName,
-                    file_type: getFileType(linkName),
+                    file_name: trimmedName,
+                    file_type: getFileType(trimmedName),
                     file_category: linkCategory,
                     storage_type: 'google_drive',
-                    file_url: linkUrl,
+                    file_url: trimmedUrl,
                     description: linkDescription,
-                    uploaded_by: user?.id,
+                    uploaded_by: user.id,
                 })
                 .select()
                 .single()
 
             if (error) {
-                console.error('Supabase insert error:', error)
                 throw error
             }
 
-            debug.success('FILE_MANAGER', 'Link saved successfully')
-
-            // Add to files array
-            if (data) {
-                setFiles(prev => [data, ...prev])
+            if (!data) {
+                throw new Error('No data returned from insert')
             }
 
-            // Close dialog and reset form
-            setIsLinkDialogOpen(false)
-            setLinkUrl("")
-            setLinkName("")
-            setLinkDescription("")
-            setLinkCategory("other")
+            console.log('[handleAddLink] ✅ Link inserted successfully')
 
-            debug.success('FILE_MANAGER', 'File added, dialog closed')
+            // ========== UPDATE LOCAL STATE SAFELY ==========
+            if (componentMountedRef.current) {
+                setFiles(prev => {
+                    // Guard: prevent adding duplicate
+                    if (prev.some(f => f.id === data.id)) return prev
+                    return [data, ...prev]
+                })
+
+                // Close dialog and reset form
+                setIsLinkDialogOpen(false)
+                setLinkUrl("")
+                setLinkName("")
+                setLinkDescription("")
+                setLinkCategory("other")
+            }
+
+            debug.success('FILE_MANAGER', 'Link added successfully')
         } catch (error: any) {
-            console.error('Error adding link:', error)
-            debug.error('FILE_MANAGER', 'Add link error', {
-                message: error?.message,
-                code: error?.code,
-                details: error?.details,
-                hint: error?.hint,
-            })
-            const msg =
-                error?.message?.includes('row-level security')
-                    ? 'You do not have permissions to add links. Ask an admin or project manager.'
-                    : error?.message || 'Failed to add link'
-            alert(msg)
+            // ========== ERROR HANDLING ==========
+            console.error('[handleAddLink] ❌ Error:', error.message)
+
+            const msg = error?.message?.includes('row-level security')
+                ? 'You do not have permissions to add links.'
+                : error?.message || 'Failed to add link'
+
+            // Only alert if component still mounted
+            if (componentMountedRef.current) {
+                alert(msg)
+            }
+
+            debug.error('FILE_MANAGER', 'Add link failed', { message: error?.message })
         } finally {
-            // Always reset submission flags
-            setLinkSubmitting(false)
+            // ========== ALWAYS RESET GUARDS ==========
+            if (componentMountedRef.current) {
+                setLinkSubmitting(false)
+            }
             isSubmittingRef.current = false
-            debug.log('FILE_MANAGER', 'Add link end - flags reset')
+            console.log('[handleAddLink] ✅ Submission complete, guards reset')
         }
     }
 
@@ -395,9 +469,35 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
 
             if (error) throw error
 
+            // Log the deletion
+            logAuditEvent({
+                action: 'delete',
+                entityType: 'file',
+                entityId: fileId,
+                status: 'success',
+                details: {
+                    project_id: projectId,
+                    storage_type: storageType,
+                },
+            }).catch(e => console.warn('Failed to log audit event:', e))
+
             fetchFiles()
         } catch (error: any) {
             console.error('Error deleting file:', error)
+
+            // Log the failure
+            logAuditEvent({
+                action: 'delete',
+                entityType: 'file',
+                entityId: fileId,
+                status: 'error',
+                errorMessage: error?.message,
+                details: {
+                    project_id: projectId,
+                    storage_type: storageType,
+                },
+            }).catch(e => console.warn('Failed to log audit event:', e))
+
             alert(error.message || 'Failed to delete file')
         }
     }
@@ -567,9 +667,12 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
                             Upload File
                         </Button>
                         <Button
-                            variant="outline"
-                            onClick={() => { debug.log('FILE_MANAGER', 'Open add link dialog'); setIsLinkDialogOpen(true) }}
-                            disabled={files.length >= 20}
+                            onClick={() => {
+                                if (isSubmittingRef.current || isUploadingRef.current) return
+                                debug.log('FILE_MANAGER', 'Open add link dialog');
+                                setIsLinkDialogOpen(true)
+                            }}
+                            disabled={files.length >= 20 || linkSubmitting || uploading}
                         >
                             <LinkIcon className="h-4 w-4 mr-2" />
                             Add Drive Link
@@ -715,7 +818,17 @@ export function FileManager({ projectId, driveFolderUrl, onDriveFolderUpdate }: 
             </Dialog>
 
             {/* Add Drive Link Dialog */}
-            <Dialog open={isLinkDialogOpen} onOpenChange={setIsLinkDialogOpen}>
+            <Dialog
+                open={isLinkDialogOpen}
+                onOpenChange={(open) => {
+                    // ========== GUARD: Prevent closing while submitting ==========
+                    if (!open && isSubmittingRef.current) {
+                        console.log('[Dialog] BLOCKED: Cannot close while submitting')
+                        return
+                    }
+                    setIsLinkDialogOpen(open)
+                }}
+            >
                 <DialogContent>
                     <form onSubmit={(e) => {
                         e.preventDefault();

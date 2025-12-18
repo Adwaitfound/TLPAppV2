@@ -16,7 +16,7 @@ import { createClient } from "@/lib/supabase/client"
 import { debug } from "@/lib/debug"
 
 export default function SettingsPage() {
-  const { user, loading: authLoading } = useAuth()
+  const { user, loading: authLoading, setUser } = useAuth()
   const [saving, setSaving] = useState(false)
   const [savedMessage, setSavedMessage] = useState("")
   const [passwordData, setPasswordData] = useState({
@@ -24,7 +24,7 @@ export default function SettingsPage() {
     new: "",
     confirm: "",
   })
-  
+
   // Profile form state
   const [profileData, setProfileData] = useState({
     full_name: "",
@@ -54,7 +54,7 @@ export default function SettingsPage() {
         bio: user.bio || "",
         avatar_url: user.avatar_url || "",
       })
-      
+
       if (user.role === 'admin' || user.role === 'project_manager') {
         setCompanyData({
           company_name: user.company_name || "",
@@ -70,14 +70,14 @@ export default function SettingsPage() {
 
   async function handleSaveProfile() {
     if (!user) return
-    
+
     setSaving(true)
     debug.log('SETTINGS', 'Saving profile', { userId: user.id })
-    
+
     const supabase = createClient()
-    
+
     try {
-      const { error } = await supabase
+      const { data: updatedProfile, error } = await supabase
         .from('users')
         .update({
           full_name: profileData.full_name,
@@ -86,10 +86,15 @@ export default function SettingsPage() {
           avatar_url: profileData.avatar_url,
         })
         .eq('id', user.id)
-      
+        .select()
+        .single()
+
       if (error) throw error
-      
+
       debug.success('SETTINGS', 'Profile saved')
+      if (updatedProfile) {
+        setUser(updatedProfile as any)
+      }
       setSavedMessage("Profile updated successfully!")
       setTimeout(() => setSavedMessage(""), 3000)
     } catch (error: any) {
@@ -102,14 +107,14 @@ export default function SettingsPage() {
 
   async function handleSaveCompany() {
     if (!user) return
-    
+
     setSaving(true)
     debug.log('SETTINGS', 'Saving company data', { userId: user.id })
-    
+
     const supabase = createClient()
-    
+
     try {
-      const { error } = await supabase
+      const { data: updatedProfile, error } = await supabase
         .from('users')
         .update({
           company_name: companyData.company_name,
@@ -120,10 +125,15 @@ export default function SettingsPage() {
           company_size: companyData.company_size,
         })
         .eq('id', user.id)
-      
+        .select()
+        .single()
+
       if (error) throw error
-      
+
       debug.success('SETTINGS', 'Company data saved')
+      if (updatedProfile) {
+        setUser(updatedProfile as any)
+      }
       setSavedMessage("Company information updated successfully!")
       setTimeout(() => setSavedMessage(""), 3000)
     } catch (error: any) {
@@ -136,29 +146,29 @@ export default function SettingsPage() {
 
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault()
-    
+
     if (passwordData.new !== passwordData.confirm) {
       alert("New passwords don't match")
       return
     }
-    
+
     if (passwordData.new.length < 6) {
       alert("Password must be at least 6 characters")
       return
     }
-    
+
     setSaving(true)
     debug.log('SETTINGS', 'Changing password')
-    
+
     const supabase = createClient()
-    
+
     try {
       const { error } = await supabase.auth.updateUser({
         password: passwordData.new
       })
-      
+
       if (error) throw error
-      
+
       debug.success('SETTINGS', 'Password changed')
       setSavedMessage("Password updated successfully!")
       setPasswordData({ current: "", new: "", confirm: "" })
@@ -188,7 +198,7 @@ export default function SettingsPage() {
           <span className="text-sm text-green-700 dark:text-green-300">{savedMessage}</span>
         </div>
       )}
-      
+
       <div>
         <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-sm md:text-base text-muted-foreground">
@@ -245,17 +255,17 @@ export default function SettingsPage() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="fullName">Full Name</Label>
-                  <Input 
-                    id="fullName" 
+                  <Input
+                    id="fullName"
                     value={profileData.full_name}
                     onChange={(e) => setProfileData({ ...profileData, full_name: e.target.value })}
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
-                  <Input 
-                    id="email" 
-                    type="email" 
+                  <Input
+                    id="email"
+                    type="email"
                     value={profileData.email}
                     disabled
                     className="opacity-50 cursor-not-allowed"
@@ -264,8 +274,8 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="phone">Phone Number</Label>
-                  <Input 
-                    id="phone" 
+                  <Input
+                    id="phone"
                     value={profileData.phone}
                     onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
                     placeholder="+91 98765 43210"
@@ -283,8 +293,8 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="flex justify-end gap-2">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => {
                     if (user) {
                       setProfileData({
@@ -321,16 +331,16 @@ export default function SettingsPage() {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="companyName">Company Name</Label>
-                  <Input 
-                    id="companyName" 
+                  <Input
+                    id="companyName"
                     value={companyData.company_name}
                     onChange={(e) => setCompanyData({ ...companyData, company_name: e.target.value })}
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="website">Website</Label>
-                  <Input 
-                    id="website" 
+                  <Input
+                    id="website"
                     placeholder="https://example.com"
                     value={companyData.website}
                     onChange={(e) => setCompanyData({ ...companyData, website: e.target.value })}
@@ -338,7 +348,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="industry">Industry</Label>
-                  <Select 
+                  <Select
                     value={companyData.industry}
                     onValueChange={(value) => setCompanyData({ ...companyData, industry: value })}
                   >
@@ -366,8 +376,8 @@ export default function SettingsPage() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="taxId">Tax ID</Label>
-                    <Input 
-                      id="taxId" 
+                    <Input
+                      id="taxId"
                       placeholder="XX-XXXXXXX"
                       value={companyData.tax_id}
                       onChange={(e) => setCompanyData({ ...companyData, tax_id: e.target.value })}
@@ -375,7 +385,7 @@ export default function SettingsPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="companySize">Company Size</Label>
-                    <Select 
+                    <Select
                       value={companyData.company_size}
                       onValueChange={(value) => setCompanyData({ ...companyData, company_size: value })}
                     >
@@ -433,8 +443,8 @@ export default function SettingsPage() {
               <form onSubmit={handleChangePassword} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="newPassword">New Password</Label>
-                  <Input 
-                    id="newPassword" 
+                  <Input
+                    id="newPassword"
                     type="password"
                     value={passwordData.new}
                     onChange={(e) => setPasswordData({ ...passwordData, new: e.target.value })}
@@ -443,8 +453,8 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="confirmPassword">Confirm New Password</Label>
-                  <Input 
-                    id="confirmPassword" 
+                  <Input
+                    id="confirmPassword"
                     type="password"
                     value={passwordData.confirm}
                     onChange={(e) => setPasswordData({ ...passwordData, confirm: e.target.value })}
@@ -452,8 +462,8 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div className="flex justify-end gap-2">
-                  <Button 
-                    type="button" 
+                  <Button
+                    type="button"
                     variant="outline"
                     onClick={() => setPasswordData({ current: "", new: "", confirm: "" })}
                   >

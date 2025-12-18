@@ -195,6 +195,7 @@ export interface Milestone {
 export interface SubProject {
   id: string
   parent_project_id: string
+  project_id?: string
   name: string
   description?: string
   status: ProjectStatus
